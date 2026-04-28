@@ -18,7 +18,7 @@ prim_op test_llm :: String -- ^ the message
   -> String
 ```
 
-[!example](./assets/example.png)
+![example](./assets/example.png)
 
 ## System F
 
