@@ -1,7 +1,7 @@
 # SystemF Elab3 - Project Status
 
-**Last Updated:** 2026-04-28
-**Test Count:** 305 elab3 tests + 280 surface tests = 585 total
+**Last Updated:** 2026-04-29
+**Test Count:** 366 elab3 tests + 304 surface tests = 670 total
 
 ## Overview
 
@@ -48,11 +48,17 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 ## Next Steps
 
 1. **SurfacePrimTypeDecl docstring support**: Enhance parser to support docstrings attached to type args. Change type arg params to `TyVar` and use a `TyVar` parser, or craft a `pre_docstring.optional() >> ident << post_docstring.optional()` parser (simpler approach).
-2. **LLM Agent Synthesizer**: Implement `LLMSynth.get_primop()`
-2. **More Built-in Types**: `Array`, `Map`, `IO`
-3. **Error Handling**: Better typechecker/evaluator error messages
-4. **Performance**: Profile evaluator for larger programs
-5. **Documentation**: User-facing surface language syntax docs
+2. **Bub primitives for tape**: Add tape operations (append, read, query) as SystemF primitives so SF code can interact with bub's tape-based context model.
+3. **LLM Agent Synthesizer**: Implement `LLMSynth.get_primop()`
+4. **More Built-in Types**: `Array`, `Map`, `IO`
+5. **Error Handling**: Better typechecker/evaluator error messages
+6. **Performance**: Profile evaluator for larger programs
+7. **Documentation**: User-facing surface language syntax docs
+## Known Issues
+
+1. **Ambiguous variable resolution not reported in source files**: When a name resolves to multiple candidates (e.g., imported from multiple modules), the renamer currently accepts the first match silently. This is correct behavior for the REPL (where shadowing is allowed), but should be a hard error when loading source code files.
+2. **Generalization produces unreadable skolem names**: Skolem type variables are printed as `$a1234`, which is hard to recognize. Should pick a human-readable representative name (e.g., from the original bound variable) during generalization.
+
 ## Entry Points
 
 - **Demo**: `systemf/src/systemf/elab3_demo.py`
