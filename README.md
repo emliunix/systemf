@@ -2,6 +2,8 @@
 
 A language designed to be small, focused on REPL usage with fork support.
 
+The idea to fork is inspired by [bub](https://github.com/bubbuild/bub), and this project is also a plugin to bub.
+
 The forked REPL design is to give LLM the access to a REPL so it can eval whatever it wants and disguise as a plain function.
 So LLM actions and plain programs can be mixed and inter-communicate freely.
 
