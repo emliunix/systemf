@@ -1,0 +1,114 @@
+-- | Demo module: sample programs using builtins.
+
+import builtins
+
+-- | Identity function
+id :: forall a. a -> a = \x -> x
+
+-- | Constant function
+const :: forall a b. a -> b -> a = \x y -> x
+
+-- | Boolean negation
+not :: Bool -> Bool = \b ->
+  case b of
+    True -> False
+    False -> True
+
+-- | Factorial
+factorial :: Int -> Int = \n ->
+  case n of
+    0 -> 1
+    _ -> n * factorial (n - 1)
+
+-- | Greeting function with literal pattern
+greet :: String -> String = \name ->
+  case name of
+    "world" -> "hello world"
+    other -> "hello " ++ other
+
+-- | Function composition
+compose :: forall a b c. (b -> c) -> (a -> b) -> a -> c = \f g x -> f (g x)
+
+-- | Apply a function twice
+twice :: forall a. (a -> a) -> a -> a = \f x -> f (f x)
+
+-- | Map a function over a list
+map :: forall a b. (a -> b) -> List a -> List b = \f xs ->
+  case xs of
+    Nil -> Nil
+    Cons x xs' -> Cons (f x) (map f xs')
+
+-- | Left fold
+foldl :: forall a b. (b -> a -> b) -> b -> List a -> b = \f acc xs ->
+  case xs of
+    Nil -> acc
+    Cons x xs' -> foldl f (f acc x) xs'
+
+-- | Check if list is empty (non-recursive)
+isEmpty :: forall a. List a -> Bool = \xs ->
+  case xs of
+    Nil -> True
+    Cons _ rest -> False
+
+-- | Get first element (non-recursive, partial)
+head :: forall a. List a -> a = \xs ->
+  case xs of
+    Cons x _ -> x
+
+-- | List length
+length :: forall a. List a -> Int = \xs ->
+  case xs of
+    Nil -> 0
+    Cons _ xs' -> 1 + length xs'
+
+-- | Append two lists
+append :: forall a. List a -> List a -> List a = \xs ys ->
+  case xs of
+    Nil -> ys
+    Cons x xs' -> Cons x (append xs' ys)
+
+-- =============================================================================
+-- Custom polymorphic data types
+-- =============================================================================
+
+-- | Sum type
+data Either a b = Left a | Right b
+
+-- | Extract left with default
+fromLeft :: forall a b. a -> Either a b -> a = \default e ->
+  case e of
+    Left x -> x
+    Right _ -> default
+
+-- | Case analysis for Either
+either :: forall a b c. (a -> c) -> (b -> c) -> Either a b -> c = \f g e ->
+  case e of
+    Left x -> f x
+    Right y -> g y
+
+-- | Binary tree
+data Tree a = Leaf a | Node (Tree a) a (Tree a)
+
+-- | Count nodes
+treeSize :: forall a. Tree a -> Int = \t ->
+  case t of
+    Leaf _ -> 1
+    Node l _ r -> 1 + treeSize l + treeSize r
+
+-- | In-order traversal to list
+treeToList :: forall a. Tree a -> List a = \t ->
+  case t of
+    Leaf x -> Cons x Nil
+    Node l x r -> append (treeToList l) (Cons x (treeToList r))
+
+-- | Mutual recursion: even/odd
+even :: Int -> Bool = \n ->
+  if n == 0 then True else odd (n - 1)
+
+odd :: Int -> Bool = \n ->
+  if n == 0 then False else even (n - 1)
+
+-- | Test explicit type annotation narrowing polymorphism
+-- const has type forall a b. a -> b -> a
+-- Here we annotate it as forall a. a -> a -> a (forcing b = a)
+testConstMono :: Int = (const :: forall a. a -> a -> a) 1 2

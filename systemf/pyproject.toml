@@ -1,0 +1,45 @@
+[project]
+name = "systemf"
+version = "0.1.0"
+description = "System F with algebraic data types - type checker and interpreter"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "parsy>=2.1",
+    "openai>=1.0.0",
+    "anthropic>=0.21.0",
+    "pyrsistent>=0.20.0",
+]
+
+[project.scripts]
+systemf = "systemf.eval.repl:main"
+systemf-repl = "systemf.eval.repl:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "hypothesis>=6.100.0",
+    "mypy>=1.9.0",
+    "ruff>=0.3.0",
+]
+
+[tool.pytest]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.mypy]
+python_version = "3.14"
+mypy_path = "./src/"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pyright]
+include = ["src"]
+extraPaths = ["src"]
+stubPath = "./typings"

@@ -1,0 +1,360 @@
+% Eisenberg 2016: Visible Type Application - Key Examples
+% Extracted from the extended version
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathpartir}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\geometry{margin=1in}
+
+\title{Eisenberg 2016: Visible Type Application \\ Key Examples with Analysis}
+\author{Extracted from ESOP 2016 (Extended version)}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+
+\section{Introduction --- Motivating Examples}
+
+\subsection{Example 1: Basic Visible Type Application (Line 67)}
+
+\textbf{Code:}
+\[
+\text{id \,@\,Int}
+\]
+
+\textbf{System:} System HMV / System V
+
+\textbf{Demonstrates:} Direct explicit type instantiation
+
+\textbf{Why it works:}
+\begin{itemize}
+\item $\text{id}$ has type $\forall a.\, a \to a$
+\item $@\text{Int}$ instantiates $a$ with $\text{Int}$
+\item Result: $\text{Int} \to \text{Int}$
+\end{itemize}
+
+---
+
+\subsection{Example 2: Proxy Workaround (Lines 153--176)}
+
+\textbf{Without visible type application (requires Proxy):}
+\[
+\begin{array}{l}
+\text{data Proxy } a = \text{Proxy} \\[6pt]
+\text{normalizeProxy} :: \forall a.\, (\text{Show } a, \text{Read } a) \Rightarrow \text{Proxy } a \to \text{String} \to \text{String} \\
+\text{normalizeProxy } x = \text{show } ((\text{read} :: \text{String} \to a)\, x) \\[6pt]
+\text{normalizeExpr} = \text{normalizeProxy } (\text{Proxy} :: \text{Proxy Expr})
+\end{array}
+\]
+
+\textbf{With visible type application (cleaner):}
+\[
+\begin{array}{l}
+\text{normalize} :: \forall a.\, (\text{Show } a, \text{Read } a) \Rightarrow \text{String} \to \text{String} \\
+\text{normalize } x = \text{show } (\text{read} \,@\,a\, x)
+\end{array}
+\]
+
+\textbf{System:} Contrasts pre-2016 GHC vs. System HMV
+
+\textbf{Demonstrates:} Eliminating proxy types
+
+\textbf{Why it works:} Visible type application allows direct specification of type arguments without runtime proxy values.
+
+---
+
+\section{System HM vs System HMV}
+
+\subsection{Example 3: Type with Multiple Variables --- Subsumption (Lines 526--532)}
+
+\textbf{Code} (Subsumption examples $\leq_{\text{hmv}}$):
+
+\textbf{These work:}
+\[
+\begin{array}{ll}
+\forall \{a, b\}.\, a \to b \;\leq_{\text{hmv}}\; \forall \{a\}.\, a \to a & \text{-- Instantiates } b \text{ with } a \\[4pt]
+\forall a, b.\, a \to b \;\leq_{\text{hmv}}\; \text{Int} \to \text{Int} & \text{-- Instantiates both} \\[4pt]
+\forall a, b.\, a \to b \;\leq_{\text{hmv}}\; \forall a.\, a \to \text{Int} & \text{-- Instantiates } b \\[4pt]
+\forall a, b.\, a \to b \;\leq_{\text{hmv}}\; \forall \{a, b\}.\, a \to b & \text{-- Generalizes both} \\[4pt]
+\forall a, b.\, a \to b \;\leq_{\text{hmv}}\; \forall \{b\}.\, \text{Int} \to b & \text{-- Instantiates } a
+\end{array}
+\]
+
+\textbf{These do NOT work:}
+\[
+\begin{array}{l}
+\forall a, b.\, a \to b \;\not\leq_{\text{hmv}}\; \forall b.\, \text{Int} \to b \quad \text{-- Can't instantiate only } b \text{, need left-to-right} \\[4pt]
+\forall \{a\}.\, a \to a \;\not\leq_{\text{hmv}}\; \forall a.\, a \to a \quad \text{-- Can't subsume generalized with specified}
+\end{array}
+\]
+
+\textbf{System:} System HMV (Higher-order Hindley-Milner with visible types)
+
+\textbf{Demonstrates:} Subsumption relation $\leq_{\text{hmv}}$
+
+\textbf{Why some work:} HMV\_InstS rule allows instantiating a tail of specified variables left-to-right
+
+\textbf{Why some fail:} Can't skip variables or mix generalized/specified incorrectly
+
+---
+
+\section{System V --- Syntax-Directed Algorithm}
+
+\subsection{Example 4: Lazy Instantiation (Line 859)}
+
+\textbf{Code:}
+\[
+(\text{let } x = (\lambda y.\, y :: \forall a.\, a \to a) \text{ in } x) \,@\,\text{Int} \;:\; \text{Int} \to \text{Int}
+\]
+
+\textbf{System:} System V
+
+\textbf{Demonstrates:} Visible type application after let-binding
+
+\textbf{Why it works:}
+\begin{enumerate}
+\item $\lambda y.\, y :: \forall a.\, a \to a$ has \textbf{specified} type $\forall a.\, a \to a$
+\item $\text{let } x = \ldots \text{ in } x$ preserves the specified type
+\item $x \,@\,\text{Int}$ can instantiate because type is specified (lazy instantiation)
+\end{enumerate}
+
+\textbf{Key insight:} If we eagerly instantiated at variable lookup, $x$ would be monomorphic and $@\text{Int}$ wouldn't work.
+
+---
+
+\section{System SB --- Higher-Rank with Bidirectional Checking}
+
+\subsection{Example 5: Higher-Rank Function Arguments (Lines 918--924)}
+
+\textbf{Without visible type application in lambda:}
+\[
+\begin{array}{l}
+\text{let foo} :: (\forall a.\, a \to a) \to (\text{Int}, \text{Bool}) \\
+\quad \text{foo} = \lambda f \to (f\, 3, f\, \text{True}) \\
+\text{in foo id}
+\end{array}
+\]
+
+\textbf{With visible type application in lambda:}
+\[
+\begin{array}{l}
+\text{let foo} :: (\forall a.\, a \to a) \to (\text{Int} \to \text{Int}, \text{Bool}) \\
+\quad \text{foo} = \lambda f \to (f \,@\,\text{Int}, f\, \text{True}) \\
+\text{in foo id}
+\end{array}
+\]
+
+\textbf{System:} System SB
+
+\textbf{Demonstrates:} Higher-rank polymorphism + visible type application
+
+\textbf{Why it works:}
+\begin{itemize}
+\item $f$ has type $\forall a.\, a \to a$ (higher-rank, polymorphic)
+\item $f \,@\,\text{Int}$ explicitly instantiates before application
+\item $f\, \text{True}$ implicitly instantiates via unification
+\end{itemize}
+
+\textbf{Rules involved:} SB\_DAbs (checking lambda), SB\_TApp (type application)
+
+---
+
+\subsection{Example 6: Mixed Instantiation Order (Lines 928--933)}
+
+\textbf{Code:}
+\[
+\begin{array}{l}
+\text{pair} :: \forall a.\, a \to \forall b.\, b \to (a, b) \\
+\text{pair} = \lambda x\, y \to (x, y) \\[6pt]
+\text{bar} = \text{pair } '\text{x}' \,@\,\text{Bool}
+\end{array}
+\]
+
+\textbf{Result:} bar inferred to have type $\text{Bool} \to (\text{Char}, \text{Bool})$
+
+\textbf{System:} System SB
+
+\textbf{Demonstrates:} Partial instantiation, order matters
+
+\textbf{Why it works:}
+\begin{enumerate}
+\item $\text{pair } '\text{x}'$ instantiates $a = \text{Char}$, now has type $\forall b.\, b \to (\text{Char}, b)$
+\item $@\text{Bool}$ instantiates $b = \text{Bool}$
+\item Final type: $\text{Bool} \to (\text{Char}, \text{Bool})$
+\end{enumerate}
+
+\textbf{Key point:} Type application can happen after some arguments are applied.
+
+---
+
+\subsection{Example 7: Two Subsumption Relations (Lines 1176--1190)}
+
+\textbf{Weak subsumption ($\leq_b$):}
+\[
+\begin{array}{l}
+\leq_b \forall a.\, a \to \text{Bool} \to \text{Bool} \quad\quad\quad \text{-- Can skip a top-level quantifier} \\[4pt]
+\leq_b (\forall a.\, a \to a) \to \text{Bool} \quad\quad\quad \text{-- Contravariant instantiation} \\[4pt]
+\text{Int} \to \forall a, b.\, a \to b \;\not\leq_b\; \text{Int} \to \forall b.\, \text{Bool} \to b \quad \text{-- Can't reorder in } \leq_b
+\end{array}
+\]
+
+\textbf{Deep skolemization ($\leq_{\text{dsk}}$):}
+\[
+\begin{array}{l}
+\text{Int} \to \forall a, b.\, a \to b \;\leq_{\text{dsk}}\; \text{Int} \to \forall b.\, \text{Bool} \to b \quad \text{-- } \leq_{\text{dsk}} \text{ CAN reorder} \\[4pt]
+\text{Int} \to \forall a.\, a \to a \;\leq_{\text{dsk}}\; \forall a.\, \text{Int} \to a \to a \quad \text{-- Can instantiate spec vars in any order} \\[4pt]
+(\text{Int} \to \forall b.\, b \to b) \to \text{Int} \;\leq_{\text{dsk}}\; (\forall a, b.\, a \to b \to b) \to \text{Int} \quad \text{-- Contravariant out-of-order inst.} \\[4pt]
+\forall \{a\}.\, a \to a \;\leq_{\text{dsk}}\; \forall a.\, a \to a \quad \text{-- Generalized } \leq \text{ specified}
+\end{array}
+\]
+
+\textbf{System:} System SB
+
+\textbf{Demonstrates:} Two subsumption relations
+
+\textbf{Why different:}
+\begin{itemize}
+\item $\leq_b$: Used at synthesis/checking boundary, must instantiate left-to-right
+\item $\leq_{\text{dsk}}$: Used for checking against specified types, more flexible
+\end{itemize}
+
+---
+
+\subsection{Example 8: Why Deep Skolemization is Necessary (Lines 1258--1308, Fig. 10)}
+
+\textbf{Setup:}
+\[
+\text{Assume } \Gamma = x : \forall \{a\}.\, \text{Int} \to a \to a
+\]
+
+\textbf{Goal:} Type-check $(x :: \text{Int} \to \forall a.\, a \to a)$
+
+\textbf{Without deep skolemization:}
+\[
+\begin{array}{l}
+\Gamma \vdash_{\text{sb}} x \Rightarrow \text{Int} \to a \to a \quad \text{-- Instantiates } \forall \{a\} \\[4pt]
+\text{Int} \to a \to a \;\not\leq\; \text{Int} \to \forall a.\, a \to a \quad \text{-- Can't subsume, } a \text{ is free!}
+\end{array}
+\]
+
+\textbf{With deep skolemization:}
+\[
+\begin{array}{l}
+\Gamma \vdash_{\text{sb}} x \Rightarrow \text{Int} \to a \to a \\[4pt]
+\text{Int} \to a \to a \;\leq_{\text{dsk}}\; \text{Int} \to \forall a.\, a \to a \quad \text{-- Deep skolemization handles inner quantifiers}
+\end{array}
+\]
+
+\textbf{System:} System SB
+
+\textbf{Demonstrates:} Fig. 10 example
+
+\textbf{Why it works:} SB\_DeepSkol rule (line 1219) pushes quantifiers inward before checking.
+
+---
+
+\section{Extended Examples (Appendix A)}
+
+\subsection{Example 9: Type-Class Constraint with Proxy (Lines 1636--1744)}
+
+\textbf{Before visible type application:}
+\[
+\text{assume} :: \forall a.\, \text{Proxy } c \to (c \Rightarrow a) \to a
+\]
+
+\textbf{Using it:}
+\[
+\text{the} :: \text{List } a \,\text{Unbranched} \to a \\
+\text{the} = \text{assume } (\text{Proxy} :: \text{Proxy } (b \sim \text{Unbranched}))
+\]
+
+\textbf{After visible type application:}
+\[
+\begin{array}{l}
+\text{assume} :: \forall a.\, (c \Rightarrow a) \to a \\[4pt]
+\text{the} = \text{assume } @(b \sim \text{Unbranched})
+\end{array}
+\]
+
+\textbf{System:} Real-world GHC extension
+
+\textbf{Demonstrates:} Visible type application for type-class constraints
+
+\textbf{Why it works:} $@(b \sim \text{Unbranched})$ explicitly specifies the equality constraint.
+
+---
+
+\subsection{Example 10: Dependently-Typed Programming (Lines 1744--1870)}
+
+\textbf{Before (with 4 Proxy arguments):}
+\[
+\text{fact} :: \forall t\, f\, s\, b.\, \text{Sing } b \to \text{Proxy } t \to \text{Proxy } f \to \text{Proxy } s \to \text{Proxy } (\text{If } b\, t\, (f\, s)) \to \text{Proxy } (f\, (f\, s))
+\]
+
+\textbf{Using it:}
+\[
+\text{fact } (\text{sEval } se_0)\, (\text{Proxy} :: \text{Proxy } (\text{Eval } e_1))\, (\text{Proxy} :: \text{Proxy } (\text{Eval } e_2))\, (\text{Proxy} :: \text{Proxy } s)
+\]
+
+\textbf{After (with visible type application, only 1 Proxy):}
+\[
+\begin{array}{l}
+\text{fact} :: \forall t\, f\, s\, b.\, \text{Sing } b \to \text{Proxy } (\text{If } b\, t\, (f\, s)) \to \text{Proxy } (f\, (f\, s)) \\[4pt]
+\text{fact } @(\text{Eval } e_1)\, @(\text{Eval } e_2)\, @s\, (\text{sEval } se_0)
+\end{array}
+\]
+
+\textbf{System:} Real-world GHC with GADTs
+
+\textbf{Demonstrates:} Eliminating 3 out of 4 Proxy arguments
+
+\textbf{Why it works:} Type application specifies $t$, $f$, $s$ directly.
+
+---
+
+\section{Summary Table: Examples by System}
+
+\begin{center}
+\begin{tabular}{|c|l|l|}
+\hline
+\textbf{Example} & \textbf{System} & \textbf{Key Feature Demonstrated} \\
+\hline
+1 & HMV/V & Basic visible type application \\
+2 & HMV/V & Proxy elimination \\
+3 & HMV & Subsumption relations \\
+4 & V & Lazy instantiation \\
+5 & SB & Higher-rank + visible types \\
+6 & SB & Partial instantiation \\
+7 & SB & Two subsumption relations \\
+8 & SB & Deep skolemization necessity \\
+9 & Real GHC & Type-class constraints \\
+10 & Real GHC & Dependently-typed programming \\
+\hline
+\end{tabular}
+\end{center}
+
+---
+
+\section{Key Takeaways}
+
+\begin{enumerate}
+\item \textbf{Lazy instantiation is crucial} --- without it, visible type application wouldn't work on let-bound variables
+
+\item \textbf{System SB requires 5 mutually recursive judgments} --- our current implementation doesn't have this structure
+
+\item \textbf{Two subsumption relations} ($\leq_b$ and $\leq_{\text{dsk}}$) handle different scenarios
+
+\item \textbf{Deep skolemization} is necessary for higher-rank types with inner quantification
+
+\item \textbf{Pattern matching} should preserve polymorphic types as ``specified'' for lazy instantiation
+\end{enumerate}
+
+\end{document}

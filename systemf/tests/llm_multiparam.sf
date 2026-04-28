@@ -1,0 +1,53 @@
+-- Multi-parameter LLM function examples using prim_op syntax
+-- These demonstrate handling multiple parameters with individual documentation
+
+-- ============================================================================
+-- Example 1: Two-Parameter Classification
+-- ============================================================================
+{-# LLM model=gpt-4 temperature=0.5 #-}
+-- | Classify text into one of the provided categories
+prim_op classify :: String
+  -- ^ Comma-separated list of valid categories
+  -> String
+  -- ^ The text to classify
+  -> String
+  -- ^ The selected category
+
+-- ============================================================================
+-- Example 2: Code Generation with Language and Description
+-- ============================================================================
+{-# LLM model=claude-sonnet temperature=0.9 #-}
+-- | Generate code in a specific programming language
+prim_op codegen :: String
+  -- ^ Programming language (e.g., Python, Haskell, Rust)
+  -> String
+  -- ^ Description of what the code should do
+  -> String
+  -- ^ The generated code
+
+-- ============================================================================
+-- Example 3: Sentiment Analysis (Minimal Configuration)
+-- ============================================================================
+{-# LLM #-}
+-- | Analyze sentiment of text
+prim_op sentiment :: String
+  -- ^ Text to analyze
+  -> String
+  -- ^ Sentiment (positive, negative, or neutral)
+
+-- ============================================================================
+-- Example 4: Three-Parameter Function
+-- ============================================================================
+{-# LLM model=gpt-4 temperature=0.3 #-}
+-- | Format text according to specifications
+prim_op formatText :: String
+  -- ^ The text to format
+  -> String
+  -- ^ Target format (e.g., markdown, html, plain)
+  -> String
+  -- ^ Additional formatting instructions
+  -> String
+  -- ^ The formatted text
+
+-- ============================================================================
+-- End of LLM multi-parameter examples

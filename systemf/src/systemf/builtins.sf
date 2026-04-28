@@ -1,0 +1,70 @@
+-- Builtins module: defines primitive types, data types, and primitive operations.
+-- This file must stay in sync with systemf/elab3/builtins.py.
+
+-- Unit type
+data Unit = MkUnit
+
+-- Bool type
+data Bool = True | False
+
+-- List type
+data List a = Nil | Cons a (List a)
+
+-- Pair type
+data Pair a b = MkPair a b
+
+-- Maybe type
+data Maybe a = Nothing | Just a
+
+-- Maybe utilities
+fromMaybe :: forall a. a -> Maybe a -> a = \default ma ->
+  case ma of
+    Nothing -> default
+    Just x -> x
+
+mapMaybe :: forall a b. (a -> b) -> Maybe a -> Maybe b = \f ma ->
+  case ma of
+    Nothing -> Nothing
+    Just x -> Just (f x)
+
+-- Integer primitives
+prim_op int_plus     :: Int -> Int -> Int
+prim_op int_minus    :: Int -> Int -> Int
+prim_op int_multiply :: Int -> Int -> Int
+prim_op int_divide   :: Int -> Int -> Int
+prim_op int_eq       :: Int -> Int -> Bool
+prim_op int_neq      :: Int -> Int -> Bool
+prim_op int_lt       :: Int -> Int -> Bool
+prim_op int_gt       :: Int -> Int -> Bool
+prim_op int_le       :: Int -> Int -> Bool
+prim_op int_ge       :: Int -> Int -> Bool
+
+-- Bool primitives
+bool_and :: Bool -> Bool -> Bool = \b -> case b of 
+    True -> \b2 -> b2
+    False -> \_ -> False
+
+bool_or  :: Bool -> Bool -> Bool = \b -> case b of 
+    True -> \_ -> True
+    False -> \b2 -> b2
+
+bool_not :: Bool -> Bool = \b -> case b of
+    True -> False
+    False -> True
+
+-- String primitives
+prim_op string_concat :: String -> String -> String
+
+-- error
+prim_op error :: forall a. String -> a
+
+-- Ref
+
+--| the Ref cell to hold a value
+prim_type Ref a
+
+prim_op mk_ref :: forall a. a -> Ref a
+
+prim_op set_ref :: forall a. Ref a -> a -> Unit
+
+prim_op get_ref :: forall a. Ref a -> a

@@ -1,0 +1,295 @@
+# Eisenberg 2016 - Visible Type Application - Paper Index
+
+**Paper**: "Visible Type Application" (Extended version)  
+**Authors**: Richard A. Eisenberg, Stephanie Weirich, Hamidhasan G. Ahmed  
+**Source**: `/systemf/docs/research/eisenberg-2016-visible-type-application.txt`
+
+---
+
+## What is this?
+
+A quick-reference index mapping section headers and key figures to line numbers in `eisenberg-2016-visible-type-application.txt`. This allows fast navigation to specific topics when reading the plain text version of the Eisenberg et al. paper on visible type application.
+
+## How to use it
+
+```bash
+# Jump to a specific section
+sed -n '24,131p' eisenberg-2016-visible-type-application.txt    # Read Section 1-2
+sed -n '425,611p' eisenberg-2016-visible-type-application.txt   # Read Section 4.2
+
+# Search for specific concepts within sections
+grep -n "HMV_TApp" eisenberg-2016-visible-type-application.txt
+
+# Find a figure
+sed -n '404,517p' eisenberg-2016-visible-type-application.txt   # Figure 3: Grammars
+```
+
+---
+
+## Main Sections
+
+| Section | Line | Description |
+|---------|------|-------------|
+| Abstract | 7-22 | Paper overview and contributions |
+| **1 Introduction** | 24-131 | Motivation, HM type systems, visible type application |
+| **2 Why visible type application?** | 132-209 | Use cases: resolving ambiguity, Proxy alternatives |
+| **3 Our approach** | 211-357 | Design challenges and solutions |
+| 3.1 Just what are the type parameters? | 219-298 | Specified vs generalized type variables |
+| 3.2 Compatible with rest of type system? | 299-357 | Lazy instantiation principle |
+| **4 HM with visible type application** | 359-664 | Declarative systems HM and HMV |
+| 4.1 System HM | 366-424 | Standard Hindley-Milner |
+| 4.2 System HMV | 425-611 | HM with visible types (HMV_TApp rule) |
+| 4.3 Properties of System HMV | 612-664 | Conservative extension, principal types |
+| **5 Syntax-directed versions** | 665-903 | Algorithmic versions C and V |
+| 5.1 System C | 721-738 | Syntax-directed HM |
+| 5.2 System V | 739-867 | Syntax-directed visible types |
+| 5.3 Relating V to HMV | 868-903 | Soundness and completeness |
+| **6 Higher-rank type systems** | 904-1621 | Bidirectional systems SB and B |
+| 6.1 System SB | 945-1232 | Syntax-directed bidirectional |
+| 6.2 System B | 1233-1440 | Declarative bidirectional |
+| 6.3 GHC Integration | 1441-1621 | Implementation details |
+
+---
+
+## Appendices
+
+| Appendix | Line | Description |
+|----------|------|-------------|
+| **A Extended examples** | 1622-1875 | Longer examples using visible types |
+| A.1 Deferring constraints | 1629-1739 | Runtime constraint deferral |
+| A.2 Dependently-typed programming | 1740-1875 | Proxy usage examples |
+| **B GHC Integration details** | 1876-2055 | Implementation in GHC |
+| B.1 Case expressions | 1882-1912 | Branch typing |
+| B.2 Type classes | 1913-1932 | Interactions with type classes |
+| B.3 Instantiate types | 1933-1980 | Inference vs specified variables |
+| B.4 Overloaded numbers | 1981-2007 | Num constraints |
+| B.5 GHCi ramifications | 2008-2027 | Interactive interpreter |
+| B.6 Further extensions | 2028-2055 | Future work |
+| **C Properties of System HMV** | 2056-2099 | Proofs about HMV |
+| **D Proofs about System V** | 2100-2364 | Soundness and completeness |
+| **E Algorithm V** | 2365-2752 | Full algorithm specification |
+| **F Higher-rank: properties of ≤b** | 2753-2828 | Subsumption relation proofs |
+| **G Higher-rank: DSK System B** | 2829-3457 | Deep skolemization properties |
+| G.1 SB soundness | 2835-2876 | System SB soundness |
+| G.2 SB completeness | 2877-2959 | System SB completeness |
+| G.3 B soundness | 2960-2980 | System B soundness |
+| G.4 B completeness | 2981-3063 | System B completeness |
+| G.5 Properties | 3064-3457 | Additional properties |
+| **H Higher-rank: OL variant** | 3458-4160 | Odersky-Läufer variant |
+| H.1 OL-B system | 3665-3706 | Declarative OL |
+| H.2 OL-SB system | 3707-3726 | Syntax-directed OL |
+| H.3 Soundness | 3727-3734 | OL soundness |
+| H.4 Completeness | 3735-3768 | OL completeness |
+| H.5 Properties | 3769-4112 | Additional properties |
+| H.6 Scoped type variables | 4113-4160 | Alternative scoping |
+
+---
+
+## Key Figures
+
+| Figure | Line | Contents |
+|--------|------|----------|
+| Fig. 1 | 47-61 | Type systems overview (HM, HMV, C, V, SB, B) |
+| Fig. 2 | 254 | Why specified polytypes? (examples) |
+| Fig. 3 | 404 | Grammars for HM and HMV |
+| Fig. 4 | 441-516 | Typing rules for HM and HMV |
+| Fig. 5 | 526-547 | HMV subsumption examples |
+| Fig. 6 | 677-719 | Syntax-directed System C |
+| Fig. 7 | 749-826 | Syntax-directed System V |
+| Fig. 8 | 949-1109 | System SB (bidirectional) |
+| Fig. 9 | 1115-1192 | Higher-rank subsumption (≤b, ≤dsk) |
+| Fig. 10 | 1308 | Why deep skolemization is necessary |
+| Fig. 11 | 1237-1395 | System B (declarative bidirectional) |
+| Fig. 12 | 2784 | Inner instantiation rules |
+| Fig. 13 | 3504 | Odersky-Läufer subsumption |
+| Fig. 14 | 3562 | System OL-B (declarative) |
+| Fig. 15 | 3661 | System OL-SB (syntax-directed) |
+
+---
+
+## Key Concepts by Location
+
+### Type Systems
+- **System HM** (standard): Lines 366-424
+- **System HMV** (with visible types): Lines 425-611
+- **System C** (syntax-directed HM): Lines 721-738
+- **System V** (syntax-directed HMV): Lines 739-867
+- **System SB** (higher-rank bidirectional): Lines 945-1232
+- **System B** (higher-rank declarative): Lines 1233-1440
+
+### Critical Rules
+- **HMV_TApp** (visible type application): Line 570-572
+- **HMV_Annot** (scoped type variables): Line 582-593
+- **V_TApp**: Line 784-786
+- **V_Annot**: Line 799-805
+- **SB_TApp**: Line 1020-1022
+- **SB_Annot**: Line 1024-1030
+
+### Type Grammar
+- **υ (specified polytype)**: Lines 522-523, 549-553
+- **σ (type scheme)**: Lines 392-393, 549-553
+- **∀{a}.τ** (generalized): Lines 406-410
+- **∀a.υ** (specified): Lines 522-523
+
+### Key Functions/Relations
+- **instantiate**: Implicit in HMV_TApp (Line 488-489)
+- **≤hmv** (subsumption): Lines 594-611
+- **≤b** (higher-rank subsumption): Lines 1115-1192
+- **≤dsk** (deep skolemization): Lines 1148-1167
+- **prenex**: Lines 1162-1167
+
+---
+
+## Quick Reference: Visible Type Application Syntax
+
+```haskell
+-- Basic visible application
+e @τ                      -- Line 382, 555-556
+
+-- Scoped type variables
+(Λa.e : υ)                -- Line 382, 556-557
+
+-- Examples from paper
+id @Int                   -- Line 67-68, 197-199
+normalize @Expr           -- Line 198-199
+read @a x                 -- Line 197
+f @Int @Bool              -- Line 256-261
+pair 'x' @Bool            -- Line 932-933
+```
+
+---
+
+## Comparison with Putting 2007
+
+| Aspect | Eisenberg 2016 | Putting 2007 |
+|--------|---------------|--------------|
+| Focus | Visible type application (`@`) | Higher-rank type inference |
+| Key innovation | Specified vs generalized vars | Bidirectional checking (⊢⇑, ⊢⇓) |
+| Systems | HM, HMV, C, V, SB, B | DM, Odersky-Läufer, bidirectional |
+| Visible types | `id @Int` | N/A (implicit only) |
+| Scoped vars | Λa.e binding | Not discussed |
+| Implementation | Appendix B (GHC) | Appendix A (Haskell) |
+
+---
+
+## Usage Example
+
+```bash
+# Find the visible type application rule
+grep -n "HMV_TApp" eisenberg-2016-visible-type-application.txt
+# Output: 570 (and surrounding lines)
+
+# Read the rule with context
+sed -n '568,580p' eisenberg-2016-visible-type-application.txt
+
+# Find where specified vs generalized is explained
+sed -n '277,298p' eisenberg-2016-visible-type-application.txt  # Section 3.1
+
+# Look at the subsumption relation
+sed -n '594,611p' eisenberg-2016-visible-type-application.txt  # ≤hmv
+```
+
+---
+
+## Examples Catalog
+
+Complete list of code examples from the paper, organized by section with descriptions.
+
+### Section 2: Why Visible Type Application?
+
+| # | Lines | Example | What It Demonstrates |
+|---|-------|---------|---------------------|
+| 2.1 | 163-176 | `normalize` with `read`/`show` | Type class ambiguity problem requiring Proxy workaround |
+| 2.2 | 196-199 | `normalize @Expr` | Clean visible type application replacing Proxy |
+
+### Section 3.1: Principal Type Ambiguity
+
+| # | Lines | Example | What It Demonstrates |
+|---|-------|---------|---------------------|
+| 3.1 | 227-261 | `pid (x, y) = (x, y)` with types (1)-(3) | Why multiple "principal" types cause visible instantiation ambiguity |
+
+### Section 4.2: HMV Subsumption Examples (Figure 5)
+
+| # | Lines | Example | What It Demonstrates |
+|---|-------|---------|---------------------|
+| 4.1 | 526 | `∀{a,b}. a→b ≤hmv ∀{a}. a→a` | Generalized variables work same as HM |
+| 4.2 | 527 | `∀a,b. a→b ≤hmv Int→Int` | Specified vars can be instantiated |
+| 4.3 | 528 | `∀a,b. a→b ≤hmv Int→∀b. b→b` | Can instantiate tail of specified vars |
+| 4.4 | 529 | `∀a,b. a→b ≤hmv ∀a. a→Bool→Bool` | Can skip top-level quantifier |
+| 4.5 | 530 | `∀a,b. a→b ≤hmv ∀{b}. Int→b` | Right-to-left instantiation rule |
+| 4.6 | 531 | `∀a,b. a→b ≰hmv ∀b. Int→b` | Cannot instantiate from left (would skip) |
+| 4.7 | 532 | `∀{a}. a→a ≰hmv ∀a. a→a` | Generalized is less general than specified |
+
+### Section 5.2: System V Examples
+
+| # | Lines | Example | What It Demonstrates |
+|---|-------|---------|---------------------|
+| 5.1 | 859 | `(let x = (λy. y : ∀a. a→a) in x) @Int` | Lazy instantiation allows visible types after let |
+
+### Section 6: Higher-Rank Types
+
+| # | Lines | Example | What It Demonstrates |
+|---|-------|---------|---------------------|
+| 6.1 | 916-924 | `foo :: (∀a. a→a) → (Int, Bool)` | Higher-rank function parameter annotation |
+| 6.2 | 922-924 | `foo = λf → (f @Int, f True)` | Visible type application on higher-rank argument |
+| 6.3 | 928-933 | `pair :: ∀a. a → ∀b. b → (a,b)` | Non-prenex quantification |
+| 6.4 | 932 | `bar = pair 'x' @Bool` | Instantiation after partial application |
+
+### Appendix A.1: Deferring Constraints
+
+| # | Lines | Example | What It Demonstrates |
+|---|-------|---------|---------------------|
+| A.1 | 1635-1640 | `class Deferrable` with `Proxy` | Original pattern requiring Proxy argument |
+| A.2 | 1694-1706 | `unsafeThe` with `assume` | Using Deferrable for runtime type checking |
+| A.3 | 1720-1728 | `assume @(b ∼ Unbranched)` | Visible type application eliminating Proxy |
+| A.4 | 1724 | `eqT @a @b` | Explicit type args for type equality check |
+
+### Appendix A.2: Dependently-Typed Programming
+
+| # | Lines | Example | What It Demonstrates |
+|---|-------|---------|---------------------|
+| A.5 | 1747-1754 | `data Expr` with `eval` | Type-level boolean expressions |
+| A.6 | 1779-1794 | `data Inst`, `ListInst` | GADT tracking stack machine state |
+| A.7 | 1798-1808 | `compile` function | Type-safe compilation with singletons |
+| A.8 | 1823-1828 | `fact` with `Proxy` arguments | Helper lemma requiring explicit types |
+| A.9 | 1831-1835 | `compile` calling `fact` | Using Proxy in GADT pattern matching |
+| A.10 | 1866-1874 | `fact @(Eval e1) @(Eval e2) @s` | Clean visible type application version |
+
+### Appendix B: GHC Integration
+
+| # | Lines | Example | What It Demonstrates |
+|---|-------|---------|---------------------|
+| B.1 | 1908-1911 | `checkIf` with `if` branches | Case expressions synthesizing monotypes |
+| B.2 | 1928-1930 | `return :: ∀m. Monad m ⇒ ∀a. a→m a` | Type class method parameter ordering |
+| B.3 | 1939-1941 | `id` vs `myId = id` | Specified vars from inferred definitions |
+| B.4 | 1987 | `3 @Int` (doesn't work) | Overloaded numeric literals limitation |
+| B.5 | 2014-2027 | GHCi type printing | Interactive interpreter type display |
+| B.6 | 2045-2048 | `MkG @b` pattern | Future: visible type patterns |
+| B.7 | 2050-2051 | `pr :: ∀(a::k1→k2) (b::k1)` | Future: visible kind application |
+
+---
+
+## Examples Summary Table
+
+| Section | Example Count | Key Concepts |
+|---------|--------------|--------------|
+| 2 - Motivation | 2 | Resolving ambiguity, Proxy replacement |
+| 3 - Design | 1 | Specified vs generalized distinction |
+| 4 - HMV System | 7 | Subsumption, visible instantiation |
+| 5 - System V | 1 | Lazy instantiation |
+| 6 - Higher-rank | 4 | Non-prenex, higher-rank args |
+| A.1 - Deferrable | 4 | Type-level programming |
+| A.2 - Stack compiler | 6 | GADTs, singletons, dependent types |
+| B - GHC Integration | 7 | Classes, inference, extensions |
+| **Total** | **32** | |
+
+---
+
+## Notes
+
+- This paper introduces **visible type application** (`e @τ`) and **specified polytypes** (υ)
+- Key distinction: **specified** (user-written) vs **generalized** (inferred) type variables
+- HMV = Hindley-Milner with visible types
+- Algorithm V uses **lazy instantiation** of specified variables
+- System SB/B extend to **higher-rank types** with bidirectional checking
+- GHC 8.0+ implements this system

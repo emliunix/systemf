@@ -1,0 +1,4161 @@
+Visible Type Application (Extended version)
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+University of Pennsylvania
+{eir,sweirich}@cis.upenn.edu
+hamidhasan14@gmail.com
+
+Abstract. The Hindley-Milner (HM) type system automatically infers
+the types at which polymorphic functions are used. In HM, the inferred
+types are unambiguous, and every expression has a principal type. Type
+annotations make HM compatible with extensions where complete type
+inference is impossible, such as higher-rank polymorphism and type-level
+functions. However, programmers cannot use annotations to explicitly
+provide type arguments to polymorphic functions, as HM requires type
+instantiations to be inferred.
+We describe an extension to HM that allows visible type application. Our
+extension requires a novel type inference algorithm, yet its declarative
+presentation is a simple extension to HM. We prove that our extended
+system is a conservative extension of HM and admits principal types. We
+then extend our approach to a higher-rank type system with bidirectional
+type-checking. We have implemented this system in the Glasgow Haskell
+Compiler and show how our approach scales in the presence of complex
+type system features.
+
+1
+
+Introduction
+
+The Hindley-Milner (HM) type system [7, 12, 18] achieves remarkable concision.
+While allowing a strong typing discipline, a program written in HM need not
+mention a single type. The brevity of HM comes at a cost, however: HM programs must not mention a single type. While this rule has long been relaxed
+by allowing visible type annotations (and even requiring them for various type
+system extensions), it remains impossible for languages based on HM, such as
+OCaml and Haskell, to use visible type application when calling a polymorphic
+function.1
+This restriction makes sense in the HM type system, where visible type application is unnecessary, as all type instantiations can be determined via unification.
+Suppose the function id has type ∀ a. a → a. If we wished to visibly instantiate the type variable a (in a version of HM extended with type annotations),
+1
+
+Syntax elements appearing in a programmer’s source code are often called explicit,
+in contrast to implicit terms, which are inferred by the compiler. However, the implicit/explicit distinction also can indicate whether terms are computationally significant [19]. Our work applies only to the inferred vs. specified distinction, so we
+use visible to refer to syntax elements appearing in source code.
+
+2
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Declarative
+HM (§4.1)
+HMV (§4.2)
+B (§6.2)
+
+Syntax-directed
+C (§5.1)
+from Damas and Milner [8] and Clément et al. [5]
+V (§5.2)
+HM types with visible type application
+SB (§6.1)
+Higher-rank types with visible type application
+
+Fig. 1. The type systems studied in this paper
+
+we could write the expression (id :: Int → Int). This annotation forces the type
+checker to unify the provided type Int → Int with the type a → a, concluding
+that type a should be instantiated with Int.
+However, this annotation is a roundabout way of providing information to
+the type checker. It would be much more direct if programmers could provide
+type arguments explicitly, writing the expression id @Int instead.
+Why do we want visible type application? In the Glasgow Haskell Compiler
+(GHC) – which is based on HM but extends it significantly – there are two main
+reasons:
+First, type instantiation cannot always be determined by unification. Some
+Haskell features, such as type classes [29] and GHC’s type families [3, 4, 11], do
+not allow the type checker to unambiguously determine type arguments from an
+annotation. The current workaround for this issue is the Proxy type which clutters implementations and requires careful foresight by library designers. Visible
+type application improves such code. (See Sect. 2.)
+Second, even when type arguments can be determined from an annotation,
+this mechanism is not always friendly to developers. For example, the variable to
+instantiate could appear multiple times in the type, leading to a long annotation.
+Partial type signatures help [30], but they do not completely solve the problem.
+2
+
+Although the idea seems straightforward, adding visible type applications to
+the HM type system requires care, as we describe in Sect. 3. In particular, we
+observe that we can allow visible type application only at certain types: those
+with specified type quantification, known to the programmer via type annotation. Such types may be instantiated either visibly by the programmer, or when
+possible, invisibly through inference.
+This paper presents a systematic study of the integration of visible type
+application within the HM typing system. In particular, the contributions of
+this paper are the four novel type systems (HMV, V, SB, B), summarized in
+Fig. 1. These systems come in pairs: a declarative version that justifies the
+compositionality of our extensions and a syntax-directed system that explains
+the structure of our type inference algorithm.
+– System HMV extends the declarative version of the HM type system with
+a single, straightforward new rule for visible type application. In support of
+this feature, it also includes two other extensions: scoped type variables and
+2
+
+Appendix A contains an example of this issue.
+
+Visible Type Application (Extended version)
+
+3
+
+a distinction between specified and generalized type quantification. The importance of this system is that it demonstrates that visible type application
+can be added orthogonally to the HM type system, an observation that we
+found obvious only in hindsight.
+– System V is a syntax-directed version of HMV. This type system directly
+corresponds to a type inference algorithm, called V. Although Algorithm
+V works differently than Algorithm W [8], it retains the ability to calculate
+principal types. The key insight is that we can delay the instantiation of type
+variables until necessary. We prove that System V is sound and complete with
+respect to HMV, and that Algorithm V is sound and complete with respect
+to System V. These results show the principal types property for HMV.
+– System SB is a syntax-directed bidirectional type system with higher-rank
+types, i.e. higher-rank types. In extending GHC with visible type application, we were required to consider the interactions of System V with all of
+the many type system extensions featured in GHC. Most interactions are
+orthogonal, as expected from the design of V. However, GHC’s extension
+to support higher-rank types [23] changes its type inference algorithm to
+be bidirectional. System SB shows that our approach in designing System
+V straightforwardly extends to a bidirectional system. System SB’s role in
+this paper is twofold: to show how our approach to visible type application meshes well with type system extensions, and to be the basis for our
+implementation in GHC.
+– System B is a novel, simple declarative specification of System SB. We prove
+that System SB is sound and complete with respect to System B. A similar
+declarative specification was not present in prior work [23]; this paper shows
+that an HM-style presentation is possible even in the case of higher-rank
+systems.
+Our visible type application extension is part of GHC 8.0. Appendix B describes this implementation and elaborates on interactions between our algorithm and other features of GHC.3
+The Appendices of this paper contain extended examples and detailed proofs
+of the properties studied about each of the systems.
+
+2
+
+Why visible type application?
+
+Before we discuss how to extend HM type systems with visible type application,
+we first elaborate on why we would like this feature in the first place.
+When a Haskell library author wishes to give a client the ability to control
+type variable instantiation, the current workaround is the standard library’s
+Proxy type.
+3
+
+Although the type inference algorithm in this paper uses unification to determine
+type instantiations, following Damas’s Algorithm W [7], the results in this paper
+are applicable to GHC’s implementation based on constraint-solving. What matters
+here is how constraints are generated (specified by the syntax-directed versions of
+type systems) not how they are solved.
+
+4
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+data Proxy a = Proxy
+However, as we shall see, programming with Proxy is noisy and painfully indirect.
+With built-in visible type application, these examples are streamlined and easier
+to work with.4 In the following example and throughout this paper, unadorned
+code blocks are accepted by GHC 7.10, blocks with a solid gray bar at the
+left are ill-typed, and blocks with a gray background are accepted only by our
+implementation of visible type application.
+Resolving type class ambiguity Suppose a programmer wished to normalize the representation of expression text by running it through a parser
+and then pretty printer. The normalize function below maps the string
+"7 - 1 * 0 + 3 / 3" to "((7 - (1 * 0)) + (3 / 3))", resolving precedence and making the meaning clear.5
+normalize :: String → String
+normalize x = show ((read :: String → Expr ) x)
+However, the designer of this function cannot make it polymorphic in a
+straightforward way. Adding a polymorphic type signature results in an ambiguous type, which GHC rightly rejects, as it cannot infer the instantiation for
+a at call sites.
+normalizePoly :: ∀ a. (Show a, Read a) ⇒ String → String
+normalizePoly x = show ((read :: String → a) x)
+Instead, the programmer must add a Proxy argument, which is never evaluated, to allow clients of this polymorphic function to specify the parser and
+pretty-printer to use
+normalizeProxy :: ∀ a. (Show a, Read a)
+⇒ Proxy a → String → String
+normalizeProxy x = show ((read :: String → a) x)
+normalizeExpr :: String → String
+normalizeExpr = normalizeProxy (Proxy :: Proxy Expr )
+With visible type application, we can write these two functions more directly:6
+4
+
+Visible type application has been a GHC feature request since 2011. See https:
+//ghc.haskell.org/trac/ghc/ticket/5296.
+5
+This example uses the following functions from the standard library,
+show :: ∀ a. Show a ⇒ a → String
+read :: ∀ a. Read a ⇒ String → a
+6
+
+as well as user-defined instances of the Show and Read classes for the type Expr .
+Our new extension TypeApplications implies the extension AllowAmbiguousTypes,
+which allows our updated normalize definition to be accepted.
+
+Visible Type Application (Extended version)
+
+5
+
+normalize :: ∀ a. (Show a, Read a) ⇒ String → String
+normalize x = show (read @a x)
+normalizeExpr :: String → String
+normalizeExpr = normalize @Expr
+Although the show /read ambiguity is somewhat contrived, proxies are indeed
+useful in more sophisticated APIs. For example, suppose a library designer would
+like to allow users to choose the representation of an internal data structure to
+best meet the needs of their application. If the type of that data structure is not
+included in the input and output types of the API, then a Proxy argument is a
+way to give this control to clients.7
+Other examples More practical examples of the need for visible type application require a fair amount of build-up to motivate the need for the intricate
+types involved. We have included two larger examples in App. A. One builds
+from recent work on deferring constraints until runtime [2] and the other on
+translating a dependently typed program from Agda [16] into Haskell.
+
+3
+
+Our approach to visible type application
+
+Visible type application seems like a straightforward extension, but adding this
+feature – both to GHC and to the HM type system that it is based on – turned
+out to be more difficult and interesting than we first anticipated. In particular,
+we encountered two significant questions.
+3.1
+
+Just what are the type parameters?
+
+The first problem is that it is not always clear what the type parameters to a
+polymorphic function are!
+One aspect of the HM type system is that it permits expressions to be given
+multiple types. For example, the identity function for pairs,
+pid (x, y ) = (x, y )
+can be assigned any of the following most general types:
+(1) ∀ a b. (a, b) → (a, b)
+(2) ∀ a b. (b, a) → (b, a)
+(3) ∀ c a b. (a, b) → (a, b)
+All of these types are principal; no type above is more general than any other.
+However, the type of the expression,
+7
+
+See http://stackoverflow.com/questions/27044209/haskell-why-use-proxy
+
+6
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Class constraints do not have a fixed ordering in types, and it is possible that a type
+variable is mentioned only in a constraint. Which of the following is preferred?
+∀ r m w a. (MonadReader r m, MonadWriter w m) ⇒ a → m a
+∀ w m r a. (MonadWriter w m, MonadReader r m) ⇒ a → m a
+Equality constraints and GADTs can add new quantified variables. Should we prefer
+the type ∀ a. a → a or the equivalent type ∀ a b. (a ∼ b) ⇒ a → b?
+Type abbreviations mean that quantifying variables as they appear can be ambiguous without also specifying how type abbreviations are used and when they are
+expanded. Suppose
+type Phantom a = Int
+type Swap a b = (b, a)
+Should we prefer ∀ a b. Swap a b → Int or ∀ b a. Swap a b → Int? Similarly, should
+we prefer ∀ a. Phantom a → Int or Int → Int?
+Fig. 2. Why specified polytypes?
+
+pid @Int @Bool
+is very different depending on which “equivalent” type is chosen for pid :
+(Int, Bool ) → (Int, Bool ) -- pid has type (1)
+(Bool , Int) → (Bool , Int) -- pid has type (2)
+∀ b. (Bool , b) → (Bool , b)
+-- pid has type (3)
+Of course, there are ad hoc mechanisms for resolving this ambiguity. We
+could try to designate one of the above types (1–3) as the real principal type
+for pid , perhaps by disallowing the quantification of unused variables (ruling
+out type 3 above) and by enforcing an ordering on how variables are quantified
+(preferring type 1 over type 2 above). Our goal would be to make sure that
+each expression has a unique principal type, with respect to its quantified type
+variables. However, in the context of the full Haskell language, this strategy
+fails. There are just too many ways that types that are not α-equivalent can be
+considered equivalent by HM. See Fig. 2 for a list of language features that cause
+difficulties.
+In the end, although it may be possible to resolve all of these ambiguities, we
+prefer not to. That approach leads to a system that is fragile (a new extension
+could break the requirement that principal types are unique up to α-equivalence),
+difficult to explain to programmers (who must be able to determine which type
+is principal) and difficult to reason about.
+Our solution: specified polytypes Our system is designed around the following principle:
+Only user-specified type parameters can be instantiated via explicit type
+applications.
+
+Visible Type Application (Extended version)
+
+7
+
+In other words, we allow visible type application to instantiate a polytype only
+when that type is given by a user annotation. This restriction follows in a long
+line of work requiring user annotations to support advanced type system features [14, 22, 23]. We refer to variables quantified in type annotations as specified variables, distinct from compiler-generated quantified variables, which we
+call generalized variables.
+There is one nuance to this rule in practice. Haskell allows programming to
+omit variable quantification, allowing a type signature like
+const :: a → b → a
+
+-- NB: no ∀
+
+Are these variables specified? We have decided that they are. There is a very
+easy rule at work here: just order the variables left-to-right as the user wrote
+them. We thus consider variables from type signatures to be specified, even when
+not bound by an explicit ∀.
+3.2
+
+Is our extension compatible with the rest of the type system?
+
+We do not want to extend just the type inference algorithm that GHC uses.
+We would also like to extend its specification, which is rooted in HM. This way,
+we will have a concise description (and better understanding) of what programs
+type check, and a simple way to reason about the properties of the type system.
+Our first attempt to add type application to GHC was based on our understanding of Algorithm W, the standard algorithm for HM type inference. This
+algorithm instantiates polymorphic functions only at occurrences of variables.
+So, it seems that the only new form we need to allow is a visible type right after
+variable occurrences:
+x @τ1 ... @τn
+However, this extension is not very robust to code refactoring. For example, it
+is not closed under substitution. If type application is only allowed at variables,
+then we cannot substitute for this variable and expect the code to still type
+check. Therefore our algorithm should allow visible type applications at other
+expression forms. But where else makes sense?
+For example, it seems sensible to allow a type instantiation is after a polymorphic type annotation (such an annotation certainly specifies the type of the
+expression):
+(λx → x :: ∀ a b. (a, b) → (a, b)) @Int
+Likewise, we should also allow a visible instantiation after a let to enable refactoring:8
+(let y = ((λx → x) :: ∀ a b. (a, b) → (a, b)) in y ) @Int
+8
+
+In fact, the Haskell 2010 Report [15] defines type annotations by expanding to a
+let-declaration with a signature.
+
+8
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+However, how do we know that we have identified all sites where visible type
+applications should be allowed? Furthermore, we may have identified them all
+for core HM, but what happens when we go to the full language of GHC, which
+includes features that may expose new potential sites?
+One way to think about this issue in a principled way is to develop a compositional specification of the type system, which allows type application for any
+expression that can be assigned a polytype. Then, if our algorithm is complete
+with respect to this specification, we will know that we have allowed type applications in all of the appropriate places. This specification is itself useful in its
+own right, as we will have a concise description (and better understanding) of
+what programs type check and a simple way to reason about the properties of
+the type system.
+Once we started thinking of specifications, we found that Algorithm W could
+not be matched up with the compositional specification that we wanted. That
+led us to reconsider our algorithm and develop a new approach to HM type
+inference.
+Our solution: lazy instantiation for specified polytypes Our new type
+inference algorithm, which we call Algorithm V, is based on the following design
+principle:
+Delay instantiation of “specified” type parameters until absolutely necessary.
+Although Algorithm W instantiates all polytypes immediately, it need not
+do so. In fact, it is possible to develop a sound and complete alternative implementation of the HM type system that does not do this immediate instantiation.
+Instead, instantiation is done only on demand, such as when a polymorphic function is applied to arguments. Lazy instantiation has been used in (non-HM) type
+inference before [10] and may be folklore; however this work contains the first
+proof that it can be used to implement the HM type system.
+In the next section, we give this algorithm a simple specification, presented
+as a small extension of HM’s existing declarative specification. We then continue
+with a syntax-directed account of the type system, characterizing where lazy
+instantiations actually must occur during type checking.
+
+4
+
+HM with visible type application
+
+To make our ideas precise, we next review the declarative specification of the
+HM type system [7, 12, 18] (which we call System HM), and then show how to
+extend this specification with visible type arguments.
+4.1
+
+System HM
+
+The grammar of System HM is shown in Fig. 3. The expression language comprises the Curry-style typed λ-calculus with the addition of numeric literals (of
+
+Visible Type Application (Extended version)
+HM
+
+9
+
+HMV
+
+Metavariables: x , y term variables
+This grammar extends HM:
+a, b, c type variables
+e ::= ... | e @τ | (Λa.e : υ) expressions
+n
+numeric literals
+τ ::= ...
+monotypes
+e ::= x | λx . e | e1 e2
+expressions
+υ ::= τ | ∀a. υ
+spec. polytypes
+| n | let x = e1 in e2
+σ ::= υ | ∀{a}. σ
+type schemes
+τ ::= a | τ1 → τ2 | Int monotypes
+Γ ::= · | Γ, x :σ | Γ, a
+contexts
+σ ::= ∀{a}. τ
+type schemes
+Γ ::= · | Γ, x :σ
+contexts
+We write (e : υ) to mean (Λ · .e : υ), ftv (σ) to be S
+the set of type variables free in σ,
+and lift ftv to contexts with ftv (x :σ, a) to be a ∪ i ftv (σi ).
+Fig. 3. Grammars for Systems HM and HMV
+
+type Int) and let-expressions. Monotypes are as usual, but we diverge from standard notation in type schemes as they quantify over a possibly-empty set of
+type variables. Here, we write these type variables in braces to emphasize that
+they should be considered order-independent. We sometimes write τ for the type
+scheme ∀{ }. τ with an empty set of quantified variables and write ∀{a}. ∀{b}. τ
+to mean ∀{a, b}. τ . Here – and throughout this paper – we liberally use the
+Barendregt convention that bound variables are always distinct from free variables.
+The declarative typing rules for System HM appear in Fig. 4. (The figure also
+includes the definition for our extended system, called System HMV, described
+in Sect. 4.2.) System HM is not syntax-directed; rules HM_Gen and HM_Sub
+can apply anywhere.
+So that we can better compare this system with others in the paper, we make
+two changes to the standard HM rules. Neither of these changes are substantial;
+our version types the same programs as the original.9 First, in HM_Let, we
+allow the type of a let expression to be a polytype σ, instead of restricting it to
+be a monotype τ . We discuss this change further in Sect. 5.2. Second, we replace
+the usual instantiation rule with HM_Sub. This rule allows the type of any
+expression to be converted to any less general type in one step (as determined
+by the subsumption relation σ1 ≤hm σ2 ). Note that in rule HM_InstG the lists
+of variables a 1 and a 2 need not be the same length.
+4.2
+
+System HMV: HM with visible types
+
+System HMV is an extension of System HM, adding visible type application. A
+key detail in its design is its separation of specified type variables from those
+arising from generalization, as initially explored in Sect. 3.1. Types may be
+generalized at any time in HMV, quantifying over a variable free in a type but
+9
+
+Both ways of the equivalence proof proceed by induction, liberally using instantiation, generalization, and subsumption to bridge the gap between the two systems.
+
+10
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Γ h̀m e : σ
+
+Typing rules for System HM
+x :σ ∈ Γ
+HM_Var
+Γ h̀m x : σ
+
+Γ, x :τ1 h̀m e : τ2
+HM_Abs
+Γ h̀m λx . e : τ1 → τ2
+
+Γ h̀m e1 : τ1 → τ2
+Γ h̀m e2 : τ1
+HM_App
+Γ h̀m e1 e2 : τ2
+
+Γ h̀m n : Int
+
+HM_Int
+
+Γ h̀m e1 : σ1
+Γ, x :σ1 h̀m e2 : σ2
+HM_Let
+Γ h̀m let x = e1 in e2 : σ2
+Γ h̀m e : σ
+a 6∈ ftv (Γ )
+HM_Gen
+Γ h̀m e : ∀{a}. σ
+σ1 ≤hm σ2
+
+Γ h̀m e : σ1
+σ1 ≤hm σ2
+HM_Sub
+Γ h̀m e : σ2
+
+HM subsumption
+a 2 6∈ ftv (∀{a 1 }. τ1 )
+τ1 [τ /a 1 ] = τ2
+HM_InstG
+∀{a 1 }. τ1 ≤hm ∀{a 2 }. τ2
+
+Γ h̀mv e : σ
+
+Extra typing rules for System HMV
+
+Γ `τ
+Γ h̀mv e : ∀a. υ
+HMV_TApp
+Γ h̀mv e @τ : υ[τ /a]
+σ1 ≤hmv σ2
+
+HMV subsumption
+
+τ1 [τ /b] = τ2
+∀a, b. τ1 ≤hmv ∀a. τ2
+Γ `υ
+
+Γ `υ
+υ = ∀a, b. τ
+Γ, a h̀mv e : τ
+a, b 6∈ ftv (Γ )
+HMV_Annot
+Γ h̀mv (Λa.e : υ) : υ
+
+HMV_InstS
+
+υ1 [τ /a 1 ] ≤hmv υ2
+a 2 6∈ ftv (∀{a 1 }. υ1 )
+HMV_InstG
+∀{a 1 }. υ1 ≤hmv ∀{a 2 }. υ2
+
+Type well-formedness
+ftv (υ) ⊆ Γ
+Ty_Scoped
+Γ `υ
+Fig. 4. Typing rules for Systems HM and HMV
+
+not free in the typing context. The type variable generalized in this manner is
+not specified, as the generalization takes place absent any direction from the
+programmer. By contrast, a type variable mentioned in a type annotation is
+specified, precisely because it is written in the program text.
+The grammar of System HMV appears in Fig. 3. The type language is enhanced with a new intermediate form υ that quantifies over an ordered list of
+type variables. (We sometimes write ∀a. ∀b. τ as ∀a, b. τ .) This form sits between
+
+Visible Type Application (Extended version)
+∀{a, b}. a → b ≤hmv ∀{a}. a → a
+∀a, b. a → b ≤hmv Int → Int
+∀a, b. a → b ≤hmv ∀a. a → Int
+∀a, b. a → b ≤hmv ∀{a, b}. a → b
+∀a, b. a → b ≤hmv ∀{b}. Int → b
+∀a, b. a → b 6≤hmv ∀b. Int → b
+∀{a}. a → a 6≤hmv ∀a. a → a
+
+11
+
+Works the same as ≤hm for type schemes
+Can instantiate specified vars
+Can instantiate only a tail of the specified vars
+Variables can be regeneralized
+Right-to-left nature of HMV_InstS
+forces regeneralization
+Known vars are instantiated from the right,
+never the left
+Specified quantification is more general
+than generalized quantification
+
+Fig. 5. Examples of HMV subsumption relation
+
+type schemes and monotypes; σs contain υs, which then contain τ s.10 Thus the
+full form of a type scheme σ can be written as ∀{a}, b. τ , including both a set of
+generalized variables {a} and a list of specified variables b. Note that order never
+matters for generalized variables (they are in a set) while order does certainly
+matter for specified variables (the list specifies their order). We say that υ is the
+metavariable for specified polytypes, distinct from type schemes σ.
+Expressions in HMV include two new forms: e @τ instantiates a specified
+type variable with a monotype τ , while (Λa.e : υ) allows us to annotate an
+expression with its type, potentially binding scoped type variables if the type is
+polymorphic. Requiring a type annotation in concert with scoped type variable
+binding ensures that the order of quantification is specified: the type annotation
+is a specified polytype υ. We do not allow annotation by type schemes σ: if the
+user writes the type, all quantified variables are considered specified.
+Typing contexts Γ in HMV are enhanced with the ability to store type variables. This feature is used to implement scoped type variables, where the type
+variables a, bound in Λa.e, are available for use in types occurring within e.
+Typing rules The type system of HMV includes all of the rules of HM plus
+the new rules and relation shown at the bottom of Fig. 4. The HMV rules
+inherited from System HM are modified to recur back to System HMV relations:
+in effect, replace all hm subscripts with hmv subscripts. Note, in particular, rule
+HM_Sub; in System HMV, this rule refers to the σ1 ≤hmv σ2 relation, described
+below.
+The most important addition to this type system is HMV_TApp, which
+enables visible type application when the type of the expression is quantified
+over a specified type variable.
+10
+
+The grammar for System HMV redefines several metavariables. These metavariables
+then have (slightly) different meanings in different sections of this paper, but disambiguation should be clear from context. In analysis relating systems with different
+grammars (for example, in Lemma 1), the more restrictive grammar takes precedence.
+
+12
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+A type annotation (Λa.e : υ), typed with HMV_Annot, allows an expression to be assigned a specified polytype. We require the specified polytype to
+have the form ∀a, b. τ ; that is, a prefix of the specified polytype’s quantified variables must be the type variables scoped in the expression.11 The inner expression
+e is then checked at type τ , with the type variables a (but not the b) in scope.
+Types that appear in expressions (such as in type annotations and explicit type
+applications) may mention only type variables that are currently in scope.
+Of course, in the Γ, a h̀mv e : τ premise, the variables a and b may appear
+in τ . We call such variables skolems and say that skolemizing υ yields τ . In
+effect, these variables form new type constants when type-checking e. When the
+expression e has type τ , we know that e cannot make any assumptions about
+the skolems a, b, so we can assign e the type ∀a, b. τ . This is, in effect, specified
+generalization.
+The relation σ1 ≤hmv σ2 (Fig. 4) implements subsumption for System HMV.
+The intuition is that, if σ1 ≤hmv σ2 , then an expression of type σ1 can be used
+wherever one of type σ2 is expected. For type schemes, the standard notion of σ1
+being a more general type than σ2 is sufficient. However for specified polytypes,
+we must be more cautious.
+Suppose an expression x @τ1 @τ2 type checks, where x has type ∀a, b. υ1 . The
+subsumption rule means that we can arbitrarily change the type of x to some
+υ, as long as υ ≤hmv ∀a, b. υ1 . Therefore, υ must be of the form ∀a, b. υ2 so that
+x @τ1 @τ2 will continue to instantiate a with τ1 and b with τ2 . Accordingly, we
+cannot, say, allow subsumption to reorder specified variables.
+However, it is safe to allow some instantiation of specified variables as part of
+subsumption, as in rule HMV_InstS. Examine this rule closely: it instantiates
+variables from the right. This odd-looking design choice is critical. Continuing
+the example above, υ could also be of the form ∀a, b, c. υ3 . In this case, the
+additional specified variable c causes no trouble – it need not be instantiated
+by a visible application. But we cannot allow instantiation left-to-right as that
+would allow the visible type arguments to skip instantiating a or b.
+Further examples illustrating ≤hmv appear in Fig. 5.
+4.3
+
+Properties of System HMV
+
+We wish System HMV to be a conservative extension of System HM. That is,
+any expression that is well-typed in HM should remain well-typed in HMV, and
+any expression not well-typed in HM (but written in the HM subset of HMV)
+should also not be well-typed in HMV.
+Lemma 1 (Conservative Extension for HMV). Suppose Γ and e are both
+expressible in HM; that is, they do not include any type instantiations, type
+annotations, scoped type variables, or specified polytypes. Then, Γ h̀m e : σ if
+and only if Γ h̀mv e : σ.
+11
+
+Note that the Barendregt convention allows bound variables to α-vary, so only the
+number of scoped type variables is important.
+
+Visible Type Application (Extended version)
+
+13
+
+This property follows directly from the definition of HMV as an extension of
+HM. Note, in particular, that no HM typing rule is changed in HMV and that the
+≤hmv relation contains ≤hm ; furthermore, the new rules all require constructs
+not found in HM.
+We also wish to know that making generalized variables into specified variables does not disrupt types:
+Lemma 2 (Extra knowledge is harmless). If Γ, x :∀{a}. τ h̀mv e : σ, then
+Γ, x :∀a. τ h̀mv e : σ.
+This property follows directly from the context generalization lemma below,
+noting that ∀a. τ ≤hmv ∀{a}. τ .
+Lemma 3 (Context generalization for HMV). If Γ h̀mv e : σ and Γ 0 ≤hmv
+Γ , then Γ 0 h̀mv e : σ.
+This lemma is proved in App. C.
+In practical terms, Lemma 2 means that if an expression contains let x =
+e1 in e2 , and the programmer figures out the type assigned to x (say, ∀{a}. τ )
+and then includes that type in an annotation (as let x = (e1 : ∀a. τ ) in e2 ), the
+outer expression’s type does not then change.
+However, note that, by design, context generalization is not as flexible for
+specified polytypes as it is for type schemes. In other words, suppose the following
+expression type-checks.
+let x = ((λy → y ) :: ∀ a b. (a, b) → (a, b)) in ...
+The programmer cannot then replace the type annotation with the type ∀ a. a →
+a, because x may be used with visible type applications. This behavior may
+be surprising, but it follows directly from the fact that ∀ a. a → a 6≤hmv
+∀ a b. (a, b) → (a, b).
+Finally, we would also like to show that HMV retains the principal types
+property, defined with respect to the enhanced subsumption relation σ1 ≤hmv σ2 .
+Theorem 4 (Principal types for HMV). For all terms e well-typed in a
+context Γ , there exists a type scheme σp such that Γ h̀mv e : σp and, for all σ
+such that Γ h̀mv e : σ, σp ≤hmv σ.
+Before we can prove this, we first must show how to extend HM’s type inference algorithm (Algorithm W [8]) to include visible type application. Once we
+do so, we can prove that this new algorithm always computes principal types.
+
+5
+
+Syntax-directed versions of HM and HMV
+
+The type systems in the previous section declare when programs are well-formed,
+but they are fairly far removed from an algorithm. In particular, the rules
+HM_Gen and HM_Sub can appear at any point in a typing derivation.
+
+14
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Γ c̀ e : τ
+
+Typing rules for System C
+x :∀{a}. τ ∈ Γ
+C_Var
+Γ c̀ x : τ [τ /a]
+
+Γ, x :τ1 c̀ e : τ2
+C_Abs
+Γ c̀ λx . e : τ1 → τ2
+
+Γ c̀ e1 : τ1 → τ2
+Γ c̀ e2 : τ1
+C_App
+Γ c̀ e1 e2 : τ2
+
+Γ c̀ n : Int
+
+C_Int
+
+gen
+
+Γ `c
+
+gen
+
+Γ `c
+
+e:σ
+
+e1 : σ
+Γ, x :σ c̀ e2 : τ2
+C_Let
+Γ c̀ let x = e1 in e2 : τ2
+
+Generalization for System C
+a = ftv (τ ) \ ftv (Γ )
+Γ c̀ e : τ
+C_Gen
+gen
+Γ `c e : ∀{a}. τ
+
+Fig. 6. Syntax-directed version of the HM type system
+
+5.1
+
+System C
+
+We can explain the HM type system in a more algorithmic manner by using a
+syntax-directed specification, called System C, in Fig. 6. This version of the type
+system, derived from Clément et al. [5], clarifies exactly where generalization and
+instantiation occur during type checking. Notably, instantiation occurs only at
+the usage of a variable, and generalization occurs only at a let-binding. These
+rules are syntax-directed because the conclusion of each rule in the main judgment Γ c̀ e : τ is syntactically distinct. Thus, from the shape of an expression,
+we can determine the shape of its typing derivation.
+However, the judgment Γ c̀ e : τ is still not quite an algorithm: it makes nondeterministic guesses. For example, in the rule C_Abs, the type τ1 is guessed;
+there is no indication in the expression what the choice for τ1 should be. The
+advantage of studying a syntax-directed system such as System C is that doing
+so separates concerns: System C fixes the structure of the typing derivation (and
+of any implementation) while leaving monotype-guessing as a separate problem.
+Algorithm W deduces the monotypes via unification, but a constraint-based
+approach [25, 28] would also work.
+5.2
+
+System V: Syntax-directed visible types
+
+Just as System C is a syntax-directed version of HM, we can also define System
+V, a syntax-directed version of HMV (Fig. 7). However, although we could define HMV by a small addition to HM (two new rules, plus subsumption), the
+difference between System C and System V is more significant.
+Like System C, System V uses multiple judgments to restrict where generalization and instantiation can occur. In particular, the system allows an expres-
+
+Visible Type Application (Extended version)
+Γ v̀ e : τ
+
+15
+
+Monotype checking for System V
+
+Γ, x :τ1 v̀ e : τ2
+V_Abs
+Γ v̀ λx . e : τ1 → τ2
+
+Γ v̀ e1 : τ1 → τ2
+Γ v̀ e2 : τ1
+V_App
+Γ v̀ e1 e2 : τ2
+∗
+
+Γ v̀ n : Int
+∗
+
+Γ `v e : υ
+
+V_Int
+
+Γ `v e : ∀a. τ
+no other rule matches
+V_InstS
+Γ v̀ e : τ [τ /a]
+
+Specified polytype checking for System V
+
+x :∀{a}. υ ∈ Γ
+V_Var
+Γ `∗v x : υ[τ /a]
+Γ `τ
+∗
+Γ `v e : ∀a. υ
+V_TApp
+Γ `∗v e @τ : υ[τ /a]
+
+∗
+
+gen
+
+Γ `v
+
+e1 : σ1
+Γ, x :σ1 `v e2 : υ2
+V_Let
+Γ `∗v let x = e1 in e2 : υ2
+
+Γ `υ
+υ = ∀a, b. τ
+Γ, a v̀ e : τ
+a, b 6∈ ftv (Γ )
+V_Annot
+Γ `∗v (Λa.e : υ) : υ
+
+Γ v̀ e : τ
+no other rule matches
+V_Mono
+Γ `∗v e : τ
+gen
+
+Γ `v
+
+e:σ
+
+Generalization for System V
+∗
+
+a = ftv (υ) \ ftv (Γ )
+Γ `v e : υ
+V_Gen
+Γ `gen
+e : ∀{a}. υ
+v
+
+Fig. 7. Typing rules for System V
+
+sion to have a type scheme only as a result of generalization (using the judgment
+Γ `gen
+e : σ). Generalization is, once again, available only in let-expressions.
+v
+However, the main difference that enables visible type annotation is the separation of the main typing judgment into two: Γ v̀ e : τ and Γ `∗v e : υ. The key
+idea is that, sometimes, we need to be lazy about instantiating specified type
+variables so that the programmer has a chance to add a visible instantiation.
+Therefore, the system splits the rules into a judgment v̀ that requires e to have
+a monotype, and those in `∗v that can retain specified quantification.
+The first set of rules in Fig. 7, as in System C, infers a monotype for the
+expression. The premises of the rule V_Abs uses this same judgment, for example, to require that the body of an abstraction have a monotype. All expressions
+can be assigned a monotype; if the first three rules do not apply, the last rule
+V_InstS infers a polytype instead, then instantiates it to yield a monotype.
+Because implicit instantiation happens all at once in this rule, we do not need to
+worry about instantiating specified variables out of order, as we did in System
+HMV.
+
+16
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+The second set of rules (the `∗v judgment) allows e to be assigned a specified
+polytype. Note that the premise of rule V_TApp uses this judgment.
+Rule V_Var is like rule C_Var: both look up a variable in the environment and instantiate its generalized quantified variables. The difference is that
+C_Var’s types can contain only generalized variables; System V’s types can
+have specified variables after the generalized ones. Yet we instantiate only the
+generalized ones in the V_Var rule, lazily preserving the specified ones.
+Rule V_Let is likewise similar to C_Let. The only difference is that the
+result type is not restricted to be a monotype. By putting V_Let in the `∗v
+judgment and returning a specified polytype, we allow the following judgment
+to hold:
+· v̀ (let x = (λy. y : ∀a. a → a) in x ) @Int : Int → Int
+The expression above would be ill-typed in a system that restricted the result of
+a let-expression to be a monotype. It is for this reason that we altered System
+HM to include a polytype in its HM_Let rule, for consistency with HMV.
+Rule V_Annot is identical to rule HMV_Annot. It uses the v̀ judgment
+in its premise to force instantiation of all quantified type variables before regeneralizing to the specified polytype υ. In this way, the V_Annot rule is effectively
+able to reorder specified variables. Here, reordering is acceptable, precisely because it is user-directed.
+Finally, if an expression form cannot yield a specified polytype, rule
+V_Mono delegates to v̀ to find a monotype for the expression.
+5.3
+
+Relating System V to System HMV
+
+Systems HMV and V are equivalent; they type check the same set of expressions.
+We prove this correspondence using the following two theorems.
+Theorem 5 (Soundness of V against HMV).
+1. If Γ v̀ e : τ , then Γ h̀mv e : τ .
+2. If Γ `∗v e : υ, then Γ h̀mv e : υ.
+3. If Γ `gen
+e : σ, then Γ h̀mv e : σ.
+v
+Theorem 6 (Completeness of V against HMV). If Γ h̀mv e : σ, then there
+exists σ 0 such that Γ `gen
+e : σ 0 where σ 0 ≤hmv σ.
+v
+The proofs of these theorems appear in App. D.
+Having established the equivalence of System V with System HMV, we can
+note that Lemma 2 (“Extra knowledge is harmless”) carries over from HMV to V.
+This property is quite interesting in the context of System V. It says that a typing
+context where all type variables are specified admits all the same expressions as
+one where some type variables are generalized. In System V, however, specified
+and generalized variables are instantiated via different mechanisms, so this is a
+powerful theorem indeed.
+It is mechanical to go from the statement of System V in Fig. 7 to an algorithm. In App. E, we define Algorithm V which implements System V, analogous
+
+Visible Type Application (Extended version)
+
+17
+
+to Algorithm W which implements System C. We then prove that Algorithm V
+is sound and complete with respect to System V and that Algorithm V finds
+principal types. Linking the pieces together gives us the proof of the principal types property for System HMV (Theorem 4). Furthermore, Algorithm V is
+guaranteed to terminate, yielding this theorem:
+Theorem 7. Type-checking System V is decidable.
+
+6
+
+Higher-rank type systems
+
+We now extend the design of System HMV to include higher-rank polymorphism [17]. This extension allows function parameters to be used at multiple
+types. Incorporating this extension is actually quite straightforward. We include
+this extension to show that our framework for visible type application is indeed
+easy to extend – the syntax-directed system we study in this section is essentially
+a merge of System V and the bidirectional system from our previous work [23].
+This system is also the basis for our implementation in GHC.
+As an example, the following function does not type check in the vanilla
+Hindley-Milner type system, assuming id has type ∀ a. a → a.
+let foo = λf → (f 3, f True) in foo id
+Yet, with the RankNTypes language extension and the following type annotation, GHC is happy to accept
+let foo :: (∀ a. a → a) → (Int, Bool )
+foo = λf → (f 3, f True)
+in foo id
+Visible type application means that higher-rank arguments can also be explicitly instantiated. For example, we can instantiate lambda-bound identifiers:
+let foo :: (∀ a. a → a) → (Int → Int, Bool )
+foo = λf → (f @Int, f True)
+in foo id
+Higher-rank types also mean that visible instantiations can occur after other
+arguments are passed to a function. For example, consider this alternative type
+for the pair function:
+pair :: ∀ a. a → ∀ b. b → (a, b)
+pair = λx y → (x, y )
+If pair has this type, we can instantiate b after providing the first component for
+the pair, thus:
+bar = pair ’x’ @Bool
+-- bar inferred to have type Bool → (Char , Bool )
+
+18
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+In the rest of this section, we provide the technical details of these language
+features and discuss their interactions. In contrast to the presentation above, we
+present the syntax-directed higher-rank system first. We do so for two reasons:
+understanding a bidirectional system requires thinking about syntax, and thus
+the syntax-directed system seems easier to understand; and we view the declarative system as an expression of properties – or a set a metatheorems – about
+the higher-rank type system.
+6.1
+
+System SB: Syntax-directed Bidirectional Type Checking
+
+Figures 8 and 9 show System SB, the higher-rank, bidirectional analogue of
+System V, supporting predicative higher-rank polymorphism and visible type
+application.
+This system shares the same expression language of Systems HMV and V,
+retaining visible type application and type annotations. However, types in System SB may have non-prenex quantification. The body of a specified polytype
+υ is now a phi-type φ: a type that has no top-level quantification but may have
+quantification to the left or to the right of arrows. Note also that these inner
+quantified types are υs, not σs. In other words, non-prenex quantification is over
+only specified variables, never generalized ones. As we will see, inner quantified
+types are introduced only by user annotation, and thus there is no way the system could produce an inner type scheme, even if the syntactic restriction were
+not in place.
+The grammar also defines rho-types ρ, which also have no top-level quantification, but do allow inner quantification to the left of arrows. We convert
+specified polytypes (which may quantify to the right of arrows) to corresponding rho-types by means of the prenex operation, which appears in Fig. 9.
+System SB is defined by five mutually recursive judgments: Γ s̀b e ⇒ φ,
+Γ `∗sb e ⇒ υ, and Γ `gen
+sb e ⇒ σ are synthesis judgments, producing the type as
+an output; Γ s̀b e ⇐ ρ and Γ `∗sb e ⇐ υ are checking judgments, requiring the
+type as an input.
+Type synthesis The synthesis judgments are very similar to the judgments
+from System V, ignoring direction arrows. The differences stem from the nonprenex quantification allowed in SB. The level of similarity is unsurprising, as
+the previous systems essentially all work only in synthesis mode; they derive
+a type given an expression. The novelty of a bidirectional system is its ability to propagate information about specified polytypes toward the leaves of an
+expression.
+Type checking Rule SB_DAbs is what makes the system higher-rank. The
+checking judgment Γ s̀b e ⇐ ρ pushes in a rho-type, with no top-level quantification. Thus, SB_DAbs can recognize an arrow type υ1 → ρ2 . Propagating
+this type into an expression λx . e, SB_DAbs uses the type υ1 as x ’s type when
+
+Visible Type Application (Extended version)
+
+19
+
+The grammar for SB extends that for System HMV (Fig. 3):
+e ::= . . .
+τ ::= . . .
+Γ ::= · | Γ, x :σ | Γ, a
+
+Γ s̀b e ⇒ φ
+
+expressions
+monotypes
+contexts
+
+∗
+
+Γ s̀b n ⇒ Int
+∗
+
+SB_Int
+
+∗
+
+Γ `sb e ⇒ ∀a. φ
+no other rule matches
+SB_InstS
+Γ s̀b e ⇒ φ[τ /a]
+
+Synthesis of specified polytypes
+
+x :∀{a}. υ ∈ Γ
+SB_Var
+Γ `∗sb x ⇒ υ[τ /a]
+
+∗
+
+Γ s̀b e1 ⇒ υ1 → υ2
+Γ `sb e2 ⇐ υ1
+SB_App
+Γ `∗sb e1 e2 ⇒ υ2
+
+Γ `τ
+∗
+Γ `sb e ⇒ ∀a. υ
+SB_TApp
+Γ `∗sb e @τ ⇒ υ[τ /a]
+
+Γ `υ
+υ = ∀a, b. φ
+∗
+a, b 6∈ ftv (Γ )
+Γ, a `sb e ⇐ φ
+SB_Annot
+Γ `∗sb (Λa.e : υ) ⇒ υ
+
+∗
+
+gen
+
+Γ, x :σ1 `sb e2 ⇒ υ2
+Γ `sb e1 ⇒ σ1
+SB_Let
+Γ `∗sb let x = e1 in e2 ⇒ υ2
+gen
+
+Γ `sb e ⇒ σ
+
+rho-types
+phi-types
+specified polytypes
+type schemes
+
+Synthesis of types without top-level quantifiers
+
+Γ, x :τ `sb e ⇒ υ
+SB_Abs
+Γ s̀b λx . e ⇒ τ → υ
+
+Γ `sb e ⇒ υ
+
+ρ ::= τ | υ1 → ρ2
+φ ::= τ | υ1 → υ2
+υ ::= φ | ∀a. υ
+σ ::= υ | ∀{a}. σ
+
+Γ s̀b e ⇒ φ
+no other rule matches
+SB_Phi
+Γ `∗sb e ⇒ φ
+
+Synthesis with generalization
+∗
+
+Γ `sb e ⇒ υ
+a = ftv (υ) \ ftv (Γ )
+SB_Gen
+gen
+Γ `sb e ⇒ ∀{a}. υ
+Γ s̀b e ⇐ ρ
+
+Checking against types without top-level quantifiers
+gen
+
+Γ, x :σ1 s̀b e2 ⇐ ρ2
+Γ `sb e1 ⇒ σ1
+SB_DLet
+Γ s̀b let x = e1 in e2 ⇐ ρ2
+∗
+
+∗
+Γ, x :υ1 `sb e ⇐ ρ2
+
+Γ s̀b λx . e ⇐ υ1 → ρ2
+∗
+
+Γ `sb e ⇐ υ
+
+SB_DAbs
+
+Γ `sb e ⇒ υ1
+υ1 ≤dsk ρ2
+no other rule matches
+SB_Infer
+Γ s̀b e ⇐ ρ2
+
+Checking against specified polytypes
+prenex (υ) = ∀a. ρ
+a 6∈ ftv (Γ )
+Γ s̀b e ⇐ ρ
+SB_DeepSkol
+Γ `∗sb e ⇐ υ
+
+Fig. 8. Syntax-directed bidirectional type system
+
+20
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+σ1 ≤b σ2
+
+Higher-rank instantiation
+
+τ ≤b τ
+
+B_Refl
+
+φ1 [τ /b] ≤b φ2
+
+υ1 [τ /a] ≤b υ2
+
+∀a, b. φ1 ≤b ∀a. φ2
+φ1 ≤∗dsk ρ2
+
+B_InstS
+
+b 6∈ ftv (∀{a}. υ1 )
+
+∀{a}. υ1 ≤b ∀{b}. υ2
+
+B_InstG
+
+Subsumption, after deep skolemization
+
+τ ≤∗dsk τ
+σ1 ≤dsk υ2
+
+υ3 ≤b υ1
+υ2 ≤b υ4
+B_Fun
+υ1 → υ2 ≤b υ3 → υ4
+
+DSK_Refl
+
+υ3 ≤dsk υ1
+υ2 ≤dsk ρ4
+DSK_Fun
+υ1 → υ2 ≤∗dsk υ3 → ρ4
+
+Deep skolemization
+prenex (υ2 ) = ∀c. ρ2
+φ1 [τ /a][τ 0 /b] ≤∗dsk ρ2
+∀{a}, b. φ1 ≤dsk υ2
+
+DSK_Inst
+
+Define prenex (υ) = ∀a. ρ as follows:
+prenex (∀a. τ )
+= ∀a. τ
+prenex (∀a. υ1 → υ2 ) = ∀a, b. υ1 → ρ2
+where ∀b. ρ2 = prenex (υ2 )
+Examples:
+∀a. a → ∀b. b → b
+∀a. a → ∀b. b → b
+∀a. a → ∀b. b → b
+(Int → Int) → Bool
+
+≤b Int → Bool → Bool Can instantiate non-top-level vars
+≤b Int → ∀b. b → b
+Not all vars must be instantiated
+≤b ∀a. a → Bool → Bool Can skip a top-level quantifier
+≤b (∀a. a → a) → Bool Contravariant instantiation
+
+Int → ∀a, b. a → b 6≤b Int → ∀b. Bool → b
+Int → ∀a. a → a 6≤b ∀a. Int → a → a
+
+Spec. vars are inst’d from the right
+Cannot move ∀ for spec. vars
+
+Int → ∀a, b. a → b ≤dsk Int → ∀b. Bool → b ≤dsk can inst. spec. vars in any order
+Int → ∀a. a → a ≤dsk ∀a. Int → a → a
+Spec. ∀ can move with ≤dsk
+(Int → ∀b. b → b) → Int ≤dsk
+(∀a, b. a → b → b) → Int Contravariant out-of-order inst.
+∀{a}. a → a ≤dsk ∀a. a → a
+Same handling of spec. and gen. vars
+Fig. 9. Higher-rank subsumption relations
+
+checking e. This is the only place in system SB where a lambda-term can abstract over a variable with a polymorphic type. Note that the synthesis rule
+SB_Abs uses a monotype for the type of x.12
+12
+
+Higher-rank systems can also include an “annotated abstraction” form, λx :υ. e. This
+form allows higher-rank types to be synthesized for lambda expressions as well as
+checked. However, this form is straightforward to add but is not part of GHC, which
+
+Visible Type Application (Extended version)
+
+21
+
+Rule SB_Infer mediates between the checking and synthesis judgments.
+When no checking rule applies, we synthesize a type and then check it according
+to the ≤dsk deep skolemization relation, taken directly from previous work and
+shown in Fig. 9. For brevity, we do not explain the details of this relation here,
+instead referring readers to Peyton Jones et al. [23, Sect. 4.6] for much deeper
+discussion. However, we note that there is a design choice to be made here;
+we could have also used Odersky–Läufer’s slightly less expressive higher-rank
+subsumption relation [21] instead. We present the system with deep skolemization for backwards compatibility with GHC. See App. H for a discussion of this
+alternative.
+The entry point into the type checking judgments is through the Γ `∗sb e ⇐ υ
+judgment. This judgment has just one rule, SB_DeepSkol. The rule skolemizes all type variables appearing at the top-level and to the right of arrows.
+Skolemizing here is necessary to expose a rho-type to the Γ s̀b e ⇐ ρ judgment,
+so that rule SB_DAbs can fire.13 For example, if the algorithm is checking
+against type ∀a. a → ∀b. b → a, it will skolemize both a and b, pushing in the
+type a → b → a. As before, by stripping off the ∀ a and ∀ b, those variables
+behave as type constants.14
+The interaction between rule SB_DeepSkol and SB_Infer is subtle. Deep
+skolemization is necessary in SB_DeepSkol because SB_Infer uses the Γ `∗sb
+e ⇒ υ synthesis judgment in its premise, instead of the Γ `gen
+sb e ⇒ σ judgment.
+This decision to avoid generalization was forced by GHC, where generalization is
+intricately tied into its treatment of let-bindings and not supported for arbitrary
+expressions. Compare SB_Infer with B_Infer, whose premise synthesizes a
+σ-type. This difference means that, in the syntax-directed system, we require
+more instantiations in the typing derivation above the SB_Infer rule. If the
+checked type were not deeply skolemized, certain inner-quantified variables would
+be unavailable for instantiation. For an illuminating example, see Fig. 10.
+6.2
+
+System B: Declarative specification
+
+Figure 11 shows the typing rules of System B, a declarative system that accepts
+the same programs as System SB. This declarative type system itself is a novel
+contribution of this work. (The systems presented in related work [10, 21, 23]
+are more similar to SB than to B.)
+Although System B is bidirectional, it is also declarative. In particular, the use
+of generalization (B_Gen), subsumption (B_Sub), skolemization (B_Skol),
+uses patterns (beyond the scope of this paper) to bind variables in abstractions.
+Therefore we omit the annotated abstraction form from our formalism.
+13
+Our choice to skolemize before SB_DLet is arbitrary, as SB_DLet does not interact with the propagated type.
+14
+Note that SB_DeepSkol does not bind scoped type variables. The variables a in
+the rule may have originally been written in a higher-rank type that is being pushed
+down from a function application. Though bringing a into scope would certainly be
+sound, it would be quite hard for a programmer to reason about. We have decided
+not to do this.
+
+22
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Assume Γ = x :∀{a}. Int → a → a. We wish to type-check the expression (x :Int →
+∀a. a → a). Here is a valid derivation in System B:
+
+x :∀{a}. Int → a → a ∈ Γ
+B_Var
+Γ b̀ x ⇒ ∀{a}. Int → a → a
+
+..
+.
+∀{a}. Int → a → a ≤dsk
+Int → ∀a. a → a
+
+Γ b̀ x ⇐ Int → ∀a. a → a
+B_Annot
+Γ b̀ (x : Int → ∀a. a → a) ⇒ Int → ∀a. a → a
+
+B_InstG
+B_Infer
+
+Here is a valid derivation in System SB:
+Int → a → a ≤∗dsk
+Int → a → a
+
+x :∀{a}. Int → a → a ∈ Γ
+∗
+
+Γ `sb x ⇒ Int → a → a
+
+SB_Var
+
+Int → a → a ≤dsk
+Int → a → a
+
+DSK_Refl
+DSK_Inst
+
+SB_Infer
+Γ s̀b x ⇐ Int → a → a
+SB_DeepSkol
+∗
+Γ `sb x ⇐ Int → ∀a. a → a
+SB_Annot
+∗
+Γ `sb (x : Int → ∀a. a → a) ⇒ Int → ∀a. a → a
+SB_Gen
+gen
+Γ `sb (x : Int → ∀a. a → a) ⇒ Int → ∀a. a → a
+Note the deep skolemization in this derivation. If we did only a shallow skolemization
+at the point we use SB_DeepSkol, then a would not be skolemized. Accordingly, it
+would be impossible to instantiate the type of x with a in the use of the SB_Var rule.
+Fig. 10. An example of why deep skolemization in SB_DeepSkol is necessary
+
+and mode switching (B_Infer), can happen arbitrarily in a typing derivation.
+Understanding what expressions are well-typed does not require knowing precisely when these operations take place.
+The subsumption rule (B_Sub) in the synthesis judgment corresponds to
+HMV_Sub from HMV. However, the novel subsumption relation ≤b used by
+this rule, shown at the top of Fig. 9, is different from the ≤dsk deep skolemization
+relation used in System SB. This σ1 ≤b σ2 judgment extends the action of
+≤hmv to higher-rank types: in particular, it allows subsumption for generalized
+type variables (which can be quantified only at the top level) and instantiation
+(only) for specified type variables. We could say that this judgment enables inner
+instantiation because instantiations are not restricted to top level. See also the
+examples at the bottom of Fig. 9.
+In contrast, rule B_Infer (in the checking judgment) uses the stronger of
+the two subsumption relations ≤dsk . This rule appears at precisely the spot in
+the derivation where a specified type from synthesis mode meets the specified
+type from checking mode. The relation ≤dsk subsumes ≤b ; that is, σ1 ≤b υ2
+implies σ1 ≤dsk υ2 .
+
+Visible Type Application (Extended version)
+Γ b̀ e ⇒ σ
+
+23
+
+Synthesis rules for System B
+Γ, x :τ b̀ e ⇒ υ
+B_Abs
+Γ `b λx . e ⇒ τ → υ
+
+x :σ ∈ Γ
+B_Var
+Γ `b x ⇒ σ
+
+Γ b̀ e1 ⇒ υ1 → υ2
+Γ b̀ e2 ⇐ υ1
+B_App
+Γ `b e1 e2 ⇒ υ2
+
+Γ `b n ⇒ Int
+
+B_Int
+
+Γ b̀ e1 ⇒ σ1
+Γ, x :σ1 b̀ e2 ⇒ σ
+B_Let
+Γ `b let x = e1 in e2 ⇒ σ
+Γ b̀ e ⇒ σ
+a 6∈ ftv (Γ )
+B_Gen
+Γ `b e ⇒ ∀{a}. σ
+Γ `τ
+Γ b̀ e ⇒ ∀a. υ
+B_TApp
+Γ `b e @τ ⇒ υ[τ /a]
+Γ b̀ e ⇐ υ
+
+Γ b̀ e ⇒ σ1
+σ1 ≤b σ2
+B_Sub
+Γ `b e ⇒ σ2
+
+Γ `υ
+υ = ∀a, b. φ
+Γ, a b̀ e ⇐ φ
+a, b 6∈ ftv (Γ )
+B_Annot
+Γ `b (Λa.e : υ) ⇒ υ
+
+Checking rules for System B
+
+Γ, x :υ1 b̀ e ⇐ υ2
+B_DAbs
+Γ `b λx . e ⇐ υ1 → υ2
+Γ b̀ e ⇐ υ
+a 6∈ ftv (Γ )
+B_Skol
+Γ `b e ⇐ ∀a. υ
+
+Γ b̀ e1 ⇒ σ1
+Γ, x :σ1 b̀ e2 ⇐ υ
+B_DLet
+Γ `b let x = e1 in e2 ⇐ υ
+Γ b̀ e ⇒ σ1
+σ1 ≤dsk υ2
+B_Infer
+Γ `b e ⇐ υ2
+
+Fig. 11. System B
+
+Properties of System B and SB We can show that Systems SB and B admit
+the same expressions.
+Lemma 8 (Soundness of System SB).
+1. If Γ s̀b e ⇒ φ then Γ `b e ⇒ φ.
+2. If Γ `∗sb e ⇒ υ then Γ `b e ⇒ υ.
+3. If Γ `gen
+b e ⇒ σ.
+sb e ⇒ σ then Γ `
+4. If Γ `∗sb e ⇐ υ then Γ `b e ⇐ υ.
+5. If Γ s̀b e ⇐ ρ then Γ `b e ⇐ ρ.
+Lemma 9 (Completeness of System SB).
+0
+0
+1. If Γ `b e ⇒ σ then Γ `gen
+sb e ⇒ σ where σ ≤b σ.
+∗
+2. If Γ `b e ⇐ υ then Γ `sb e ⇐ υ.
+
+What is the role of System B? In our experience, programmers tend to prefer
+the syntax-directed presentation of the system because that version is more
+algorithmic. As a result, it can be easier to understand why a program type
+checks (or doesn’t) by reasoning about System SB.
+
+24
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+However, the fact that System B is sound and complete with respect to
+System SB provides properties that we can use to reason about SB. The main
+difference between the two is that System B divides subsumption into two different relations. The weaker ≤b can be used at any time during synthesis, but
+it can only instantiate (but not generalize) specified variables. The stronger ≤dsk
+is used at only the check/synthesis boundary but can generalize and reorder
+specified variables.
+The connection between the two systems tells us that B_Sub is admissible
+for SB. As a result, when refactoring code, we need not worry about precisely
+where a type is instantiated, as we see here that instantiation need not be determined syntactically.
+Likewise, the proof also shows that System B (and System SB) is flexible with
+respect to the instantiation relation ≤b in the context. As in System HMV, this
+result implies that making generalized variables into specified variables does not
+disrupt types.
+Lemma 10 (Context Generalization). Suppose Γ 0 ≤b Γ .
+1. If Γ `b e ⇒ σ then there exists σ 0 ≤b σ such that Γ 0 `b e ⇒ σ 0 .
+2. If Γ `b e ⇐ υ and υ ≤b υ 0 then Γ 0 `b e ⇐ υ 0 .
+Proofs of these properties appear in App. G.
+6.3
+
+Integrating visible type application with GHC
+
+System SB is the direct inspiration for the type-checking algorithm used in our
+version of GHC enhanced with visible type application. It is remarkably straightforward to implement the system described here within GHC; accounting for
+the behavior around imported functions (Sect. 3.1) was the hardest part. The
+other interactions (the difference between this paper’s scoped type variables and
+GHC’s, how specified type variables work with type classes, etc.) are generally
+uninteresting; see App. B for further comments.
+One pleasing synergy between visible type application and GHC concerns
+GHC’s recent partial type signature feature [30]. This feature allows wildcards,
+written with an underscore, to appear in types; GHC infers the correct replacement for the wildcard. These work well in visible type applications, allowing
+the user to write @ as a visible type argument where GHC can infer the argument. For example, if f has type ∀ a b. a → b → (a, b), then we can write
+f @ @[Int ] True [ ] to let GHC infer that a should be Bool but to visibly instantiate b to be [Int ]. Getting partial type signatures to work in the new context
+of visible type applications required nothing more than hooking up the pieces.
+
+7
+
+Related work and Conclusions
+
+Explicit type arguments The F# language [26] permits explicit type arguments in function applications and method invocations. These explicit arguments, typically mandatory, are used to resolve ambiguity in type-dependent
+operations. However, the properties of this feature have not been studied.
+
+Visible Type Application (Extended version)
+
+25
+
+Implicit arguments in dependently-typed languages Languages such as
+Coq [6], Agda [20], Idris [1] and Twelf [24] are not based on the HM type system,
+so their designs differ from Systems HMV and B. However, they do support
+invisible arguments. In these languages, an invisible argument is not necessarily
+a type; it could be any argument that can be inferred by the type checker.
+Coq, Agda, and Idris require all quantification, including that for invisible
+arguments, to be specified by the user. These languages do not support generalization, i.e., automatically determining that an expression should quantify
+over an invisible argument (in addition to any visible ones). They differ in how
+they specify the visibility of arguments, yet all of them provide the ability to
+override an invisibility specification and provide such arguments visibly. These
+languages also provide a facility for named invisible arguments, allowing users
+to specify argument values by name instead of by position. This choice means
+that α-equivalent types are no longer fully interchangeable. Though we have not
+studied this possibility deeply, we conjecture that formally specifying a namedargument system would encounter many of the same subtleties (in particular,
+requiring two different subsumption relations in the metatheory) that we encountered with positional arguments.
+Twelf, on the other hand, supports invisible arguments via generalization and
+visible arguments via specification. Although it is easy to convert between the
+two versions, there is no way to visibly provide an invisible argument as we have
+done. Instead, the user must rely on type annotations to control instantiations.
+Specified vs. generalized variables Dreyer and Blume’s work on specifying
+ML’s type system and inference algorithm in the presence of modules [9] introduces a separation of (what we call) specified and generalized variables. Their
+work focuses on the type parameters to ML functors, finding inconsistencies between the ML language specification and implementations. They conclude that
+the ML specification as written is hard to implement and propose a new one.
+Their work includes a type system that allows functors to have invisible arguments alongside their visible ones. This specification is easier to implement, as
+they demonstrate.
+Their work has similarities to ours in the separation of classes of variables
+and the need to alter the specification to make type inference reasonable. Interestingly, they come from the opposite direction from ours, adding invisible
+arguments in a place where arguments previously were all visible. However, despite these surface similarities, we have not found a deeper connection between
+our work and theirs.
+Predicative, higher-rank type systems As we have already indicated, Systems B and SB are directly inspired by GHC’s design for higher-rank types [23].
+However, in this work we have redesigned the algorithm to use lazy instantiation
+and have made a distinction between specified polytypes and generalized polytypes. Furthermore, we have pushed the design further, providing a declarative
+specification for the type system.
+
+26
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Our work is also closely related to recent work on using a bidirectional type
+system for higher-rank polymorphism by Dunfield and Krishnaswami [10], called
+DK below. The closest relationship is between their declarative system (Fig. 4
+in their paper) and our System SB (Fig. 8). The most significant difference is
+that the DK system never generalizes. All polymorphic types in their system
+are specified; functions must have a type annotation to be polymorphic. Consequently, DK uses a different algorithm for type checking than the one proposed
+in this work. Nevertheless, it defers instantiations of specified polymorphism,
+like our algorithm.
+Our relation ≤dsk , which requires two specified polytypes, is similar to the
+DK subsumption relation. The DK version is slightly weaker as it does not
+use deep skolemization; but that difference is not important in this context.
+Another minor difference is that System SB uses the Γ s̀b e ⇒ φ judgment
+to syntactically guide instantiation whereas the the DK system uses a separate
+application judgment form. System B – and the metatheory of System SB – also
+includes implicit subsumption ≤b , which does not have an analogue in the DK
+system. A more extended comparison with the DK system appears in App. H.
+Conclusion This work extends the HM type system with visible type application, while maintaining important properties of that system that make it useful
+for functional programmers. Our extension is fully backwards compatible with
+previous versions of GHC. It retains the principal types property, leading to
+robustness during refactoring. At the same time, our new systems come with
+simple, compositional specifications.
+While we have incorporated visible type application with all existing features of GHC, we do not plan to stop there. We hope that our mix of specified
+polytypes and type schemes will become a basis for additional type system extensions, such as impredicative types, type-level lambdas, and dependent types.
+Acknowledgments Thanks to Simon Peyton Jones, Dimitrios Vytiniotis, Iavor
+Diatchki, Adam Gundry, Conor McBride, Neel Krishnaswami, and Didier Rémy
+for helpful discussion and feedback.
+
+Bibliography
+
+[1] Edwin Brady. Idris, a general-purpose dependently typed programming
+language: Design and implementation. J. Funct. Prog., 23, 2013.
+[2] Pablo Buiras, Dimitrios Vytiniotis, and Alejandro Russo. HLIO: Mixing
+static and dynamic typing for information-flow control in Haskell. In International Conference on Functional Programming, ICFP ’15. ACM, 2015.
+[3] Manuel M. T. Chakravarty, Gabriele Keller, and Simon Peyon Jones. Associated type synonyms. In International Conference on Functional Programming, ICFP ’05. ACM, 2005.
+[4] Manuel M. T. Chakravarty, Gabriele Keller, Simon Peyton Jones, and Simon Marlow. Associated types with class. In ACM SIGPLAN-SIGACT
+Symposium on Principles of Programming Languages, 2005.
+[5] Dominique Clément, Thierry Despeyroux, Gilles Kahn, and Joëlle Despeyroux. A simple applicative language: Mini-ML. In Conference on LISP and
+Functional Programming, LFP ’86. ACM, 1986.
+[6] Coq development team. The Coq proof assistant reference manual. LogiCal
+Project, 2004. URL http://coq.inria.fr. Version 8.0.
+[7] Luis Damas. Type Assignment in Programming Languages. PhD thesis,
+University of Edinburgh, 1985.
+[8] Luis Damas and Robin Milner. Principal type-schemes for functional programs. In Symposium on Principles of Programming Languages, POPL ’82.
+ACM, 1982.
+[9] Derek Dreyer and Matthias Blume. Principal type schemes for modular
+programs. In Proceedings of the 16th European Conference on Programming,
+ESOP’07. Springer-Verlag, 2007.
+[10] Joshua Dunfield and Neelakantan R. Krishnaswami. Complete and easy
+bidirectional typechecking for higher-rank polymorphism. In International
+Conference on Functional Programming, ICFP ’13. ACM, 2013.
+[11] Richard A. Eisenberg, Dimitrios Vytiniotis, Simon Peyton Jones, and
+Stephanie Weirich. Closed type families with overlapping equations. In
+Principles of Programming Languages, POPL ’14. ACM, 2014.
+[12] J. Roger Hindley. The principal type-scheme of an object in combinatory
+logic. Transactions of the American Mathematical Society, 146, 1969.
+[13] Ralf Lämmel and Simon Peyton Jones. Scrap your boilerplate: A practical design pattern for generic programming. In Workshop on Types in
+Languages Design and Implementation. ACM, 2003.
+[14] Didier Le Botlan and Didier Rémy. MLF : Raising ML to the power of
+System F. In International Conference on Functional Programming. ACM,
+2003.
+[15] Simon Marlow (editor). Haskell 2010 language report, 2010.
+[16] Conor McBride. Agda-curious? Keynote, ICFP’12, 2012.
+[17] Nancy McCracken. The typechecking of programs with implicit type structure. In Gilles Kahn, David B. MacQueen, and Gordon Plotkin, editors,
+
+28
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Semantics of Data Types, volume 173 of Lecture Notes in Computer Science. Springer Berlin Heidelberg, 1984.
+[18] Robin Milner. A Theory of Type Polymorphism in Programming. Journal
+of Computer and System Sciences, 17, 1978.
+[19] Alexandre Miquel. The implicit calculus of constructions: Extending pure
+type systems with an intersection type binder and subtyping. In Samson
+Abramsky, editor, Typed Lambda Calculi and Applications, volume 2044 of
+Lecture Notes in Computer Science, pages 344–359. Springer Berlin Heidelberg, 2001.
+[20] Ulf Norell. Towards a practical programming language based on dependent
+type theory. PhD thesis, Department of Computer Science and Engineering,
+Chalmers University of Technology, SE-412 96 Göteborg, Sweden, September 2007.
+[21] Martin Odersky and Konstantin Läufer. Putting type annotations to work.
+In Symposium on Principles of Programming Languages, POPL ’96. ACM,
+1996.
+[22] Simon Peyton Jones, Dimitrios Vytiniotis, Stephanie Weirich, and Geoffrey
+Washburn. Simple unification-based type inference for GADTs. In International Conference on Functional Programming, ICFP ’06. ACM, 2006.
+[23] Simon Peyton Jones, Dimitrios Vytiniotis, Stephanie Weirich, and Mark
+Shields. Practical type inference for arbitrary-rank types. Journal of Functional Programming, 17(1), January 2007.
+[24] Frank Pfenning and Carsten Schürmann. System description: Twelf - a
+meta-logical framework for deductive systems. In H. Ganzinger, editor,
+Proceedings of the 16th International Conference on Automated Deduction
+(CADE-16), number 1632 in LNAI, pages 202–206, Trento, Italy, July 1999.
+Springer-Verlag.
+[25] François Pottier and Didier Rémy. Advanced Topics in Types and Programming Languages, chapter The Essence of ML Type Inference, pages 387–489.
+The MIT Press, 2005.
+[26] Don Syme. The F# 2.0 Language Specification. Microsoft Research and the
+Microsoft Developer Division, 2012. Accessed from http://fsharp.org/
+specs/language-spec/2.0/FSharpSpec-2.0-April-2012.pdf.
+[27] Dimitrios Vytiniotis, Stephanie C. Weirich, and Simon Peyon Jones. Practical type inference for arbitrary-rank types: Technical appendix. Technical Report MS-CIS-05-14, University of Pennsylvania, 2005. URL http:
+//repository.upenn.edu/cis_reports/58/.
+[28] Dimitrios Vytiniotis, Simon Peyton Jones, Tom Schrijvers, and Martin Sulzmann. OutsideIn(X) modular type inference with local assumptions. Journal of Functional Programming, 21(4-5), September 2011.
+[29] Philip Wadler and Stephen Blott. How to make ad-hoc polymorphism less
+ad-hoc. In POPL, pages 60–76. ACM, 1989.
+[30] Thomas Winant, Dominique Devriese, Frank Piessens, and Tom Schrijvers.
+Partial type signatures for haskell. In Practical Aspects of Declarative Languages, volume 8324, pages 17–32. Springer International Publishing, January 2014.
+
+Visible Type Application (Extended version)
+
+29
+
+[31] Brent A. Yorgey, Stephanie Weirich, Julien Cretin, Simon Peyton Jones,
+Dimitrios Vytiniotis, and José Pedro Magalhães. Giving Haskell a promotion. In Types in Language Design and Implementation, TLDI ’12. ACM,
+2012.
+
+30
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+A
+
+Extended examples using visible types
+
+In this section we present two longer examples that benefit from the addition of
+visible type application. The second expands and explains the code presented in
+Sect. 2.
+A.1
+
+Deferring constraints to runtime
+
+Recent work [2] uses the following definition to enable mixing static and dynamic
+typing in order to implement information-flow control in Haskell:1516
+class Deferrable (c :: Constraint) where
+assume :: ∀ a. Proxy c → (c ⇒ a) → a
+The parameter to the class Deferrable is a constraint kind – that is, the kind
+classifying constraints that appear to the left of ⇒. For example, Show a is a
+Constraint. The idea behind Deferrable is that, if a constraint is deferred, the
+program calculates at runtime whether or not the constraint holds.
+Let’s consider deferring an equality constraint, written τ1 ∼ τ2 in Haskell.
+Equality constraints are ordinary constraints; in particular, they have kind
+Constraint and can thus be deferred. However, if we have some type variable
+a and wish to check if a is, say, Bool at runtime, we need runtime type information. Haskell’s Typeable feature [13] implements runtime type information. If we
+have a function,
+woozle :: Typeable a ⇒ a → a
+then runtime information identifying the type a is available at runtime, in the
+body of woozle.
+Putting this all together, it seems reasonable to defer an equality constraint
+between two types if we have runtime type information for both of them:
+instance (Typeable a, Typeable b)
+⇒ Deferrable (a ∼ b) where ...
+However, to implement assume, we need one more definition.
+Propositional equality: :∼: Recent standard libraries shipped with GHC
+contain the following datatype:
+15
+
+Much of this example – including its use of deferring equality constraints – appears
+in Buiras et al. [2]. However, our use of visible type application in this example is
+our own contribution, novel in this paper.
+16
+This example requires several GHC extensions to compile: RankNTypes,
+TypeOperators, DataKinds, PolyKinds, ConstraintKinds, GADTs,
+ScopedTypeVariables, and TypeApplications
+
+Visible Type Application (Extended version)
+
+31
+
+data a :∼: b where
+Refl :: a :∼: a
+This datatype implements propositional equality. If you have a value pf :: τ1 :∼:
+τ2 , that is a proof that types τ1 and τ2 are equal. Pattern matching on pf reveals
+this equality to GHC’s type-checker, which can then use it in a pattern match:
+boolCast :: (a :∼: Bool ) → a → Bool
+boolCast pf b = case pf of Refl → b
+Runtime cast The Typeable feature uses :∼: in an important function:
+eqT :: (Typeable a, Typeable b) ⇒ Maybe (a :∼: b)
+Given runtime type information for a and b, this function conditionally provides
+a proof that a and b are equal. The eqT function, in turn, can be used to
+implement a runtime cast.
+We are now ready to assemble the pieces:
+instance (Typeable a, Typeable b)
+⇒ Deferrable (a ∼ b) where
+assume x = case eqT :: Maybe (a :∼: b) of
+Just Refl → x
+Nothing → error "type error!"
+Making assumptions Suppose we are working a list type that tracks whether
+it has surely one element, or whether there is an unknown length.17 Here are the
+relevant definitions:
+data Flag = Branched -- 0 or more elements
+| Unbranched
+-- exactly 1 element
+data List a (b :: Flag ) = ...
+the :: List a Unbranched → a
+the = ...
+In some places, it is hard to arrange for the type system to ascertain that a list
+is Unbranched , and calling the is impossible. However, with Deferrable, we can
+get around that pesky static type system:
+unsafeThe :: ∀ a b. Typeable b ⇒ List a b → a
+unsafeThe `
+= assume (Proxy :: Proxy (b ∼ Unbranched ))
+(the `)
+The call to assume means that the ` is type-checked in an environment where the
+constraint b ∼ Unbranched is assumed. The call the ` then type-checks without
+a problem.
+17
+
+This example is from real code – just such a list is used within GHC when keeping
+track of type family axioms from either open [3, 4] or closed [11] type families.
+
+32
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Deferring errors with visible type application This last snippet of code
+assumes a constraint, and the only way of specifying the constraint is via a Proxy .
+This is what visible type application can ameliorate. Let’s rewrite this example
+with visible type application.
+class Deferrable (c :: Constraint) where
+assume :: ∀ a. (c ⇒ a) → a
+instance (Typeable a, Typeable b)
+⇒ Deferrable (a ∼ b) where
+assume x = case eqT @a @b of
+Just Refl → x
+Nothing → error "type error!"
+unsafeThe :: ∀ a b. Typeable b ⇒ List a b → a
+unsafeThe ` = assume @(b ∼ Unbranched ) (the `)
+
+We have used visible type applications in two places here. One is to fix the
+type of the call to eqT . Because we immediately pattern-match on this result,
+GHC has no way of inferring the types at which to use eqT . In the previous
+version of this example, it was necessary to write eqT :: Maybe (a :∼: b) here.
+This annotation is noisy, because we care only about the a and the b – the
+Maybe and :∼: bits are fixed and add no information. It is easy to imagine more
+complex cases where the noise far outstrips the signal.
+The second use of visible type application is in the definition and call of
+assume, where no Proxy argument is now necessary. Once again, this has cleaned
+up our code and drastically reduced noise.
+A.2
+
+Dependently-typed programming with Proxy
+
+Dependently-typed programming in GHC can require more extensive use of proxies. For example, based on Conor McBride’s ICFP 2012 keynote [16], consider a
+stack-based compiler for a language of boolean expressions. (The entire code for
+this example is available in the supplementary material.)
+data Expr :: ?where
+Val :: Bool → Expr
+Cond :: Expr → Expr → Expr → Expr
+eval :: Expr → Bool
+eval (Val n)
+=n
+eval (Cond e0 e1 e2 ) =
+if eval e0 then eval e1 else eval e2
+Using standard techniques, we can create a singleton type for expressions
+SExpr and a type-level function Eval that allow the type system to talk about
+these definitions.
+
+Visible Type Application (Extended version)
+
+33
+
+eval :: Expr → Bool
+eval (Val n) = n
+eval (Cond e0 e1 e2 ) = if eval e0 then eval e1 else eval e2
+type family Eval (x :: Expr ) :: Bool where
+Eval (’Val n) = n Eval (’
+Cond e0 e1 e2 ) = If (Eval e0 ) (Eval e1 ) (Eval e2 )
+For example, the evaluator for singleton booleans states that it actually calculates the boolean denoted by the expression:
+sEval :: SExpr e → SBool (Eval e)
+sEval (SVal n) = n
+sEval (SCond e0 e1 e2 ) = sIf (sEval e0 ) (sEval e1 ) (sEval e2 )
+However, instead of evaluating booleans directly, we would like to compile
+them to a list of instructions for a stack machine. At the same time, we would
+like to know that the resulting list of instruction will produce the correct answer
+when run.
+In other words, given a GADT representing instruction lists, that when run
+will take a stack from its initial configuration to the final configuration:
+data Inst (initial :: [Bool ]) (final :: [Bool ]) where
+-- Add a value to the top of the stack
+PUSH :: Sing v → Inst s (v ’: s)
+-- Compare the top value on the stack and branch
+IFPOP :: ListInst s st → ListInst s sf
+→ Inst (b ’: s) (If b st sf )
+-- a list of instructions, also tracking the machine configurations
+data ListInst (initial :: [Bool ]) (final :: [Bool ]) where
+Nil :: ListInst i i
+(:::) :: Inst i j → ListInst j k → ListInst i k
+infixr 5 :::
+-- concatenate two lists, composing their stacks
+(++) :: ListInst i j → ListInst j k → ListInst i k
+Nil ++ ys = ys
+(x ::: xs) ++ ys = x ::: (xs ++ ys)
+infixr 5 ++
+We would like to define a compilation function that will create a list of
+instructions that, when run, will put the evaluation of an expression at the top
+of the stack.
+compile :: ∀ (e :: Expr ) (s :: [Bool ]).
+SExpr e → ListInst s ((Eval e) ’: s)
+The implementation of the compilation function is straightforward in the case
+of a singleton boolean value. It just pushes that value on the top of an empty
+stack.
+
+34
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+compile (SVal y ) = PUSH y ::: Nil
+However, the compilation of conditionals runs into difficulties, we would like
+to use this code, which first compiles the scrutinee, and then appends the branch
+instruction.
+compile (SCond se0 se1 se2 ) =
+compile se0 ++
+IFPOP (compile se1 ) (compile se2 ) ::: Nil
+However, for this code to type check, the compiler needs to know the following
+conversion fact about if expressions:
+(If (Eval e0 ) (Eval e1 ) (Eval e2 )) ’: vs) :∼:
+(If (Eval e0 ) ((Eval e1 ) ’: vs) ((Eval e2 ) ’: vs))
+We can “prove” this fact to the compiler, with a helper lemma, called fact
+below. Note, however that in the result of the lemma, the type variables t and
+f only appear as arguments to the type-level function If . Therefore, unification
+cannot be used to instantiate these arguments, so the Proxy type is necessary.
+fact :: ∀ t f s b. Sing b → Proxy t → Proxy f → Proxy s
+→ ((If b t f ) ’: s) :∼: (If b (t ’: s) (f ’: s))
+fact STrue
+= Refl
+= Refl
+fact SFalse
+We can call fact in the case for compile, by providing the appropriate Proxy
+arguments.
+compile (SCond se0 (se1 :: Sing e1 ) (se2 :: Sing e2 )) =
+case fact (sEval se0 ) (Proxy :: Proxy (Eval e1 ))
+(Proxy :: Proxy (Eval e2 )) (Proxy :: Proxy s) of
+Refl → compile se0 ++
+IFPOP (compile se1 ) (compile se2 ) ::: Nil
+Note, that in our definition of fact above, we have made the argument s be
+specified via Proxy , even though it doesn’t technically need to to be because it
+appears outside of the If in the type. GHC will also accept this alternative fact ’
+that does not include a Proxy s argument.
+fact ’ :: ∀ t f s b. Sing b → Proxy t → Proxy f
+→ ((If b t f ) ’: s) :∼: (If b (t ’: s) (f ’: s))
+fact ’STrue
+= Refl
+fact ’SFalse
+= Refl
+However, that version of fact is even more difficult to use. Because the result
+of fact ’ is used as the argument of GADT pattern matching, GHC cannot use
+
+Visible Type Application (Extended version)
+
+35
+
+unification to resolve type variables in this type. Instead, to make this code type
+check, we require an even more extensive type annotation:
+compile (SCond (se0 :: Sing e0 )
+(se1 :: Sing e1 ) (se2 :: Sing e2 )) =
+case (fact ’(sEval se0 )
+(Proxy :: Proxy (Eval e1 ))
+(Proxy :: Proxy (Eval e2 )) ::
+((If (Eval e0 ) (Eval e1 ) (Eval e2 )) ’: s) :∼:
+(If (Eval e0 ) ((Eval e1 ) ’: s) ((Eval e2 ) ’: s))) of
+Refl → compile se0 ++
+IFPOP (compile se1 ) (compile se2 ) ::: Nil
+In the presence of visible type application, we would like to avoid the proxies
+all together:
+fact :: ∀ t f s b. Sing b →
+((If b t f ) ’: s) :∼: (If b (t ’: s) (f ’: s))
+fact STrue = Refl
+fact SFalse = Refl
+and supply the type arguments visibly:
+compile (SCond se0 (se1 :: Sing e1 ) (se2 :: Sing e2 )) =
+case fact @(Eval e1 ) @(Eval e2 ) @s (sEval se0 ) of
+Refl → compile se0 ++
+IFPOP (compile se1 ) (compile se2 ) ::: Nil
+
+B
+
+Integrating visible type application with GHC
+
+Below, we describe describe interactions between visible type application and
+other features of GHC and some possible extensions enabled by our implementation.
+B.1
+
+Case expressions
+
+Typing rules for case analysis and if-expressions require that all branches have
+the same type. But what sort of type should that be? For example, consider the
+expression
+if condition then id else (λx → x)
+Here, id has a specified polytype of ∀ a. a → a, but the expression λx → x does
+not. To make this code type check, GHC must find a common type for both
+branches.
+
+36
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+One option would be to generalize the type of λx → x and then choose
+∀ a. a → a as the common supertype of itself and ∀{a}. a → a. However, that
+may not be possible in general, as there may not always be a common instance
+of both types.
+Instead, following prior work [23], we require that if and case expressions
+synthesize monotypes. Accordingly, the type checker instantiates the type id
+above before unification.
+Note that specified polytypes are still available for type checking because
+we know the type that each branch should have. For example, the following
+declaration is accepted:
+checkIf :: Bool → (∀ a. a → a) → (Bool , Int)
+checkIf b = if True
+then λf → (f True, f 5)
+else λf → (f False, f 3)
+
+B.2
+
+Type classes
+
+Consider the Monad type class:
+class Applicative m ⇒ Monad m where
+return :: a → m a
+(>
+>=) :: m a → (a → m b) → m b
+...
+The return and (>
+>=) functions have user-supplied type signatures and thus have
+specified type parameters. But in what order? Our implementation uses the
+following simple rule: class variables come before method variables. The full types
+of these methods are thus
+return :: ∀ m. Monad m ⇒ ∀ a. a → m a
+(>
+>=) :: ∀ m. Monad m ⇒ ∀ a b. m a → (a → m b) → m b
+Note that, in the type of return, m is quantified before a, even though a appears
+first in the user-supplied type.
+B.3
+
+Instantiate types when inferring
+
+When a variable is defined without an explicit type annotation, are its parameters specified or generalized? According to the systems laid out in this paper,
+the answer depends on the variable’s definition. For example:
+id :: a → a
+id x = x
+myId = id
+
+Visible Type Application (Extended version)
+
+37
+
+According to our technique of lazy instantiation, the use of id in the body of
+myId is not instantiated. The variable myId thus gets the same type – with its
+specified type parameter – of id .
+However, in GHC, we add an extra step: when inferring the type of a variable,
+deeply instantiate the right-hand side before generalizing. In this example, id
+would get deeply instantiated (that is, all top-level type parameters variables
+and all type parameters to the right of arrows) before generalizing, giving myId
+a type ∀ {a}. a → a, where the type parameter has been generalized.
+This design choice solves all three of the following problems:
+– Haskell includes the monomorphism restriction. This restriction states that
+no variable (as distinct from function, which is defined by pattern-matching
+on arguments) may have a type that includes a class constraint.
+Consider the definition myAbs = abs. The type of abs is ∀ a. Num a ⇒ a → a.
+According to the monomorphism restriction, myAbs is not allowed to have
+this type – it should get the type Integer → Integer according to Haskell’s
+defaulting rules. Yet, because of lazy instantiation, the type checker never
+really reasons about the Num constraint and would allow myAbs to have such
+the wrong, polymorphic type. By instantiating deeply and then generalizing,
+the type checker is given a chance to notice the Num constraint and react
+accordingly.
+– Haskellers are used to prenex quantification, where all the ∀s are at the top.
+But if we say x = λ → id , the naive interpretation of System SB would
+give x :: ∀ {a}. a → ∀ b. b → b. This type is unexpected. Documentation
+for x would include such a strange type, and clients would have to know to
+supply the first term-level argument before visibly instantiating the second.
+By deeply instantiating before generalizing, we give x the type ∀ {a b }. a →
+b → b, which is more in line with expectations.
+– According to our design decision about imported functions in Sect. 3.1, imported functions have specified type parameters if and only if the function
+is defined with a user-supplied type signature. However, the algorithm in
+System SB gives myId , above, the type ∀ a. a → a, with a specified type
+parameter. This would mean that myId would be available for visible type
+application in its defining module, but any importing modules would see a
+generalized type parameter for myId . This discrepancy does not cause any
+great problems, but it would be unexpected for users. Once again, instantiating and regeneralizing solves the problem.
+B.4
+
+Overloaded numbers
+
+Numeric literals in Haskell are overloaded. That is, when we write the number
+3 in code, it can have any type that is a member of the Num class; the type of 3
+is thus Num a ⇒ a. It is thus expected that users could write 3 @Int to get the
+Int 3, instead of an overloaded 3.
+However, this does not work. Here is the partial definition of the Num class:
+
+38
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+class Num a where
+...
+fromInteger :: Integer → a
+When a 3 is written in code, it gets translated to fromInteger 3, where 3 is our
+rendering of the Integer 3. According to our treatment of class methods, the full
+type of fromInteger is ∀ a. Num a ⇒ Integer → a. This type means that any
+visible type application for an overloaded number literal would have to come
+between the fromInteger and the number; no straightforward translation from
+Haskell source could accommodate this. If fromInteger were not a class method,
+we could just define it to have the type Integer → ∀ a. Num a ⇒ a, which would
+work nicely. This option, however, is not available.
+Happily, it is almost as easy to write (3 :: Int) as 3 @Int, and so we will go to
+no great pains to correct this infelicity.
+B.5
+
+Ramifications in GHCi
+
+The interactive interpreter GHCi allows users to query the type of expressions.
+Consider what the answer to the following query should be:
+λ> let myPair :: ∀ a. a → ∀ b. b → (a, b)
+myPair = (, )
+λ> :t myPair 3
+It would be reasonable to respond ∀ b. b → (a, b), recalling that numbers are
+overloaded and we have not yet determined the type of 3. However, this output loses the critical information that the constraint Num a must be satisfied.
+Alternatively, we could generalize before printing, producing ∀ a b. Num a ⇒
+b → (a, b), but that could mislead users into thinking that a is still available for
+visible type application.
+We thus have implemented a middle road, producing ∀ b. Num a ⇒ b →
+(a, b) in this situation. Note that there is no ∀ a, as a is not available for visible
+type application. The Num a constraint is listed after the ∀ b quantification only
+because Haskellers often include type variable quantification before constraints.
+The precise location of Num a is in fact irrelevant, as there is no facility for
+visible dictionary application.
+B.6
+
+Further extensions to visible type application
+
+Our implementation also gives us the chance to explore two related extensions
+in future work.
+Visible type binding in patterns Consider the GADT
+data G a where
+MkG :: ∀ b. G (Maybe b)
+
+Visible Type Application (Extended version)
+
+39
+
+When pattern-matching on a value of type G a to get the constructor MkG , we
+would want a mechanism to bind a type variable to b, the argument to Maybe.
+A visible type pattern makes this easy:
+case g of
+MkG @b → ...
+The type variable b may now be used as a scoped type variable in the body of
+the match.
+Visible kind application The following function is kind-polymorphic [31]:
+pr :: ∀ (a :: k 1 → k 2 ) (b :: k 1 ). Proxy (a b) → Proxy a
+pr = Proxy
+Yet, even with our extension, we cannot instantiate the kind parameters k 1 and
+k 2 visibly; all kind variables are treated as generalized variables. We expect to
+address this deficiency in future work.
+
+C
+
+Properties of System HMV
+
+Lemma 11 (Inversion for ≤hmv ). σ1 ≤hmv σ2 if and only if σ1
+∀{a 1 }, b 2 , b 1 . τ1 and σ3 = ∀{a 2 }, b 2 . τ2 where τ1 [τ 1 /a 1 ][τ 01 /b 1 ] = τ2 .
+
+=
+
+Proof. By unfolding definitions.
+Lemma 12 (Reflexivity for ≤hmv ). Forall σ, σ ≤hmv σ
+Proof. By definition.
+
+Lemma 13 (Transitivity for ≤hmv ). If σ1 ≤hmv σ2 and σ2 ≤hmv σ3 , then
+σ1 ≤hmv σ3 .
+Proof. Let σ3 = ∀{a 3 }, b 3 . τ3 . Then, by inversion, we know σ2 =
+∀{a 2 }, b 3 , b 2 . τ2 and τ2 [τ 2 /a 2 ][τ 02 /b 2 ] = τ3 . We further know σ1 =
+∀{a 1 }, b 3 , b 2 , b 1 . τ1 and τ1 [τ 1 /a 1 ][τ 01 /b 1 ] = τ2 . Thus, τ1 [τ 1 /a 1 ][τ 01 /b 1 ][τ 2 /a 2 ][τ 02 /b 2 ] =
+τ3 . By the Barendregt convention, we know that a 2 do not appear in τ1 . Thus
+we can rewrite as τ1 [τ 1 [τ 2 /a]/a 1 ][τ 01 [τ 2 /a 2 ]/b 1 ][τ 02 /b 2 ] = τ3 . This is enough to
+finish the derivation via HMV_InstS and HMV_InstG.
+
+Lemma 14 (Substitution in ≤hmv ).
+1. If υ1 ≤hmv υ2 , then υ1 [τ /a] ≤hmv υ2 [τ /a].
+2. If σ1 ≤hmv σ2 , then σ1 [τ /a] ≤hmv σ2 [τ /a].
+
+40
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Proof. Immediate.
+
+Lemma 15 (Context Generalization for HMV). If Γ
+Γ 0 ≤hmv Γ , then Γ 0 h̀mv e : σ.
+
+h̀mv
+
+e : σ and
+
+Proof. This is by straightforward induction, with an appeal to HMV_Sub in
+the variable case (HMV_Var).
+Proof (Proof of Lemma 2 (Extra knowledge)). This is a corollary of contexts
+generalization as ∀a. τ ≤hmv ∀{a}. τ .
+
+D
+
+Proofs about System V
+
+Proof (Proof of Soundness of V against HMV (Theorem 5)). By induction on
+the appropriate derivation. Most cases follow directly via induction.
+Case V_InstS This case follows via induction and HMV_Sub using the fact
+that ∀a. τ ≤hmv τ [τ /a] by HMV_InstS.
+Case V_Var This case follows via HMV_Var and HMV_Sub using the
+fact that ∀{a}. τ ≤hmv τ [τ /a] by HMV_InstG.
+Lemma 16 (Context generalization for V).
+1. If Γ `∗v e : υ and Γ 0 ≤hmv Γ , then there exists υ 0 such that Γ 0 `∗v e : υ 0 and
+υ 0 ≤hmv υ.
+2. If Γ v̀ e : τ and Γ 0 ≤hmv Γ , then Γ 0 v̀ e : τ
+3. If Γ `gen
+e : σ and Γ 0 ≤hmv Γ , then there exists σ 0 such that Γ 0 `gen
+e : σ0
+v
+v
+0
+and σ ≤hmv σ.
+In all cases, the size of resulting derivation is no larger than the size of the input
+derivation.
+Proof. By induction on derivations. Most cases are straightforward; we present
+the most illuminating cases below:
+Case V_Var:
+x :∀{a}. υ ∈ Γ
+V_Var
+Γ `∗v x : υ[τ /a]
+Given x :∀{a 0 }. υ 0 ∈ Γ 0 where ∀{a 0 }. υ 0 ≤hmv ∀{a}. υ, we must choose τ 0 such
+that υ 0 [τ 0 /a 0 ] ≤hmv υ[τ /a]. Inverting ≤hmv gives us that υ 0 [τ 0 /a 0 ] ≤hmv υ.
+We are thus done by Lemma 14. Note that the size of both derivations is 1.
+Case V_TApp:
+Γ `τ
+Γ `∗v e : ∀a. υ
+V_TApp
+Γ `∗v e @τ : υ[τ /a]
+
+Visible Type Application (Extended version)
+
+41
+
+The induction hypothesis gives us Γ 0 `∗v e : υ 0 where υ 0 ≤hmv ∀a. υ. By the
+definition of ≤hmv , υ 0 must also be quantified over a. We can thus reduce
+to ∀a. υ 00 ≤hmv ∀a. υ, which reduces to υ 00 ≤hmv υ. We must prove that
+υ 00 [τ /a] ≤hmv υ[τ /a], which follows directly from υ 00 ≤hmv υ via Lemma 14,
+and so we are done.
+Case V_Gen:
+a = ftv (υ) \ ftv (Γ )
+Γ `∗v e : υ
+V_Gen
+e : ∀{a}. υ
+Γ `gen
+v
+The induction hypothesis gives us Γ 0 `∗v e : υ 0 where υ 0 ≤hmv υ. By inversion,
+0
+0
+we know that υ 0 = ∀a 0 , b . τ1 and υ = ∀a 0 . τ2 where τ1 [τ 0 /b ] = τ2 .
+Let a = ftv (υ) \ ftv (Γ ) and b = ftv (υ 0 ) \ ftv (Γ 0 ). We want to
+show that ∀{b}. υ 0 ≤hmv ∀{a}. υ. Expanding out, we want to show that
+0
+∀{b}, a 0 , b . τ1 ≤hmv ∀{a}, a 0 . τ2 , where τ1 [τ /b] = τ2 . Unfolding ≤hmv shows
+0
+that we want τ1 [τ /b][τ 0 /b ] = τ2 . Choose τ = b and we are done.
+Lemma 17 (Type substitution). If Γ ` τ then Γ [τ 0 /a] ` τ .
+Proof. By the definition of rule Ty_Scoped. Note that substituting in the
+context has no effect.
+Lemma 18 (Substitution for V). Assume a ∈
+/ Γ . That is, a is not a scoped
+type variable. Further, assume Γ ` τ .
+1. If Γ v̀ e : τ 0 , then Γ [τ /a] v̀ e : τ 0 [τ /a].
+2. If Γ `∗v e : υ, then Γ [τ /a] `∗v e : υ[τ /a].
+3. If Γ `gen
+e : σ, then Γ [τ /a] `gen
+e : σ[τ /a].
+v
+v
+Proof. By induction, frequently using the Barendregt convention to rename
+bound variables to avoid coinciding with free variables.
+Note that a cannot appear anywhere in an expression, as a is not a scoped
+type variable. Thus, any types appearing in expressions are unaffected by the
+substitution [τ /a]. This realization covers the V_TApp case.
+The interesting case is generalization: The premise of this case is Γ `∗v e : υ
+where σ = ∀{b}. υ for b = ftv (υ) \ ftv (Γ ). By the Barendregt convention, note
+that b do not contain a.
+The induction hypothesis gives us Γ [τ /a] `∗v e : υ[τ /a]. Let c = ftv (υ[τ /a]) \
+ftv (Γ [τ /a]). To use V_Gen to conclude Γ `gen
+e : (∀{c}. υ)[τ /a], we must show
+v
+that b = c and that c are not free in τ .
+We now have several cases:
+a is free in both υ and in Γ : In this case ftv (υ[τ /a]) includes the free type
+variables of υ, minus a, plus the free variables of τ . Likewise, ftv (Γ [τ /a])
+includes ftv (Γ ), minus a, plus the free variables of τ . In each case, the sets
+that produce c are changed by the same variables. Therefore, b and c must
+be equal.
+
+42
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+a is free in υ but not free in Γ : To be in this case a must be in b, which
+cannot happen.
+a is not free in υ but is free in Γ : In this case b = c and we are easily
+done.
+a is free in neither υ nor Γ : In this case the substitution has no effect and
+we are done.
+Proof (Proof of Completeness (Theorem 6)). We proceed by induction on Γ h̀mv
+e : σ.
+Case HMV_Var: Straightforward, using the types a to instantiate the variables a in V_Var. We know these a are not free in Γ by the Barendregt
+convention. It may be the case that generalization quantifies over more variables, i.e. a ⊆ a 0 = ftv (υ) \ ftv (Γ ), leading to a more general result type.
+However, that is permitted by the statement of the theorem.
+Case HMV_Abs:
+Γ, x :τ1 h̀mv e : τ2
+HMV_Abs
+Γ h̀mv λx . e : τ1 → τ2
+The induction hypothesis gives us Γ, x :τ1 `gen
+e : ∀{a}, b. τ20 where τ2 =
+v
+gen
+∗
+0 0
+τ2 [τ /b][τ /a]. Inverting `v gives us Γ, x :τ1 `v e : ∀b. τ20 . We can then use
+V_InstS and V_Abs to get Γ v̀ λx . e : τ1 → τ20 [τ 0 /b]. Generalizing, we get
+Γ `gen
+λx . e : ∀{a, a 0 }. τ1 → τ20 [τ 0 /b] where the new variables a 0 come from
+v
+generalizing τ1 and the τ 0 . We can see that (τ1 → τ20 [τ 0 /b])[τ /a] = τ1 → τ2
+and so ∀{a, a 0 }. τ1 → τ20 [τ 0 /b] ≤hmv τ1 → τ2 and we are done.
+Case HMV_App:
+Γ h̀mv e1 : τ1 → τ2
+Γ h̀mv e2 : τ1
+HMV_App
+Γ h̀mv e1 e2 : τ2
+The induction hypothesis gives us Γ `gen
+e1 : ∀{a 1 }, b 1 . τ11 → τ12 with
+v
+e2 :
+τ1 = τ11 [τ 1 /a 1 ][τ 01 /b 1 ] and τ2 = τ12 [τ 1 /a 1 ][τ 01 /b 1 ], along with Γ `gen
+v
+∗
+∀{a 2 }, b 2 . τ21 with τ1 = τ21 [τ 2 /a 2 ][τ 02 /b 2 ]. Inverting `gen
+gives
+us
+Γ
+`
+v
+v e1 :
+∀b 1 . τ11 → τ12 and Γ `∗v e2 : ∀b 2 . τ21 .
+We now use the Substitution Lemma (Lemma 18) with the substitution
+[τ 1 /a 1 ] on the first of these to yield Γ `∗v e1 : ∀b 1 . τ11 [τ 1 /a 1 ] → τ12 [τ 1 /a 1 ].
+Note that the a 1 must not be free in Γ , by inversion of `gen
+v . Similarly,
+Lemma 18 gives us Γ `∗v e2 : ∀b 2 . τ21 [τ 2 /a 2 ].
+We can then use V_InstS on both of these judgments, to show Γ v̀ e1 :
+τ11 [τ 1 /a 1 ][τ 01 /b 1 ] → τ12 [τ 1 /a 1 ][τ 01 /b 1 ] and Γ v̀ e2 : τ21 [τ 2 /a 2 ][τ 02 /b 2 ].
+We can now now use V_App, as the argument type is equal to τ1 , established
+earlier. Rule V_App then gives us Γ v̀ e1 e2 : τ12 [τ 1 /a 1 ][τ 01 /b 1 ]. This type,
+as noted earlier, equals τ2 , and so we are done.
+Case HMV_Int
+HMV_Int
+Γ h̀mv n : Int
+Trivial.
+
+Visible Type Application (Extended version)
+
+43
+
+Case HMV_TApp:
+Γ `τ
+Γ h̀mv e : ∀a. υ
+HMV_TApp
+Γ h̀mv e @τ : υ[τ /a]
+∗
+0
+The induction hypothesis (after inverting `gen
+v ) gives us Γ `
+v e : ∀a. υ , where
+0
+0
+b = ftv (∀a. υ ) \ ftv (Γ ) and υ [τ /b] ≤hmv υ. Applying V_TApp gives us
+Γ `∗v e @τ : υ 0 [τ /a], and V_Gen gives us Γ `gen
+e @τ : ∀{c}. υ 0 [τ /a] where
+v
+0
+c = ftv (υ [τ /a]) \ ftv (Γ ). We want to show that ∀{c}. υ 0 [τ /a] ≤hmv υ[τ /a],
+which follows when there is some τ 0 , such that υ 0 [τ /a][τ 0 /c] ≤hmv υ[τ /a].
+This is equivalent to exchanging the substitution, i.e. finding a τ 0 such that
+υ 0 [τ 0 /c][τ /a] ≤hmv υ[τ /a].
+By Substitution (Lemma 14), we have υ 0 [τ /b][τ /a] ≤hmv υ[τ /a]. We also
+know that the b are a subset of the c. So we can choose τ 0 to be τ for the b,
+and the remaining c elsewhere, and we are done.
+Case HMV_Let:
+
+Γ h̀mv e1 : σ1
+Γ, x :σ1 h̀mv e2 : σ2
+HMV_Let
+Γ h̀mv let x = e1 in e2 : σ2
+The induction hypothesis gives us Γ `gen
+e1 : σ10 with σ10 ≤hmv σ1 . The
+v
+gen
+induction hypothesis also gives us Γ, x :σ1 `v e2 : σ2 with σ20 ≤hmv σ2 . Use
+Lemma 16 to get Γ, x :σ10 `gen
+e2 : σ200 where σ200 ≤hmv σ20 .
+v
+00
+Let σ2 = ∀{b}. υ where b = ftv (υ) \ ftv (Γ ). Inverting `gen
+gives us Γ, x :σ10 `∗v
+v
+∗
+e2 : υ. We then use V_Let to get Γ `v let x = e1 in e2 : υ. Generalizing gives
+us Γ `gen
+let x = e1 in e2 : ∀{b}. υ.
+v
+Transitivity of ≤hmv (Lemma 13) gives us ∀{b}. υ ≤hmv σ2 .
+Case HMV_Annot:
+Γ `υ
+υ = ∀a, b. τ
+Γ, a h̀mv e : τ
+a, b 6∈ ftv (Γ )
+HMV_Annot
+Γ h̀mv (Λa.e : υ) : υ
+0
+
+0
+
+The induction hypothesis gives us Γ `gen
+e : ∀{b}, b . τ 0 with τ 0 [τ /b][τ 0 /b ] =
+v
+0 0
+gen
+∗
+τ . Inverting `v gives us Γ `v e : ∀b . τ . Applying V_InstS gives us Γ v̀
+e : τ and we can use V_Annot to be done.
+Case HMV_Int: Trivial.
+Case HMV_Gen:
+Γ h̀mv e : σ
+a 6∈ ftv (Γ )
+HMV_Gen
+Γ h̀mv e : ∀{a}. σ
+The induction hypothesis gives us Γ `gen
+e : σ 0 where σ 0 ≤hmv σ. We know
+v
+0
+0
+σ ≤hmv ∀{a}. σ. In other words, if σ = ∀{b}. υ1 and σ = ∀{c}. υ2 , we have
+some τ such that υ1 [τ /b] = υ2 . By the definition of ≤hmv we can use these
+same τ to show that σ 0 ≤hmv ∀{a, c}. υ2 .
+
+44
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Case HMV_Sub:
+
+Γ h̀mv e : σ1
+σ1 ≤hmv σ2
+HMV_Sub
+Γ h̀mv e : σ2
+
+The induction hypothesis gives us Γ `gen
+e : σ 0 where σ 0 ≤hmv σ1 . By transiv
+tivity of ≤hmv , we are done.
+
+E
+
+Algorithm V
+
+In this appendix, we use metavariables Q, R, and S to refer to substitutions
+from type variables a to monotypes τ . We apply and compose these as functions,
+homomorphically lifted from type variables to types.
+We suppose the existence of a unification algorithm U, that produces a substitution S, with the following properties
+
+– If S = Ua (τ1 , τ2 ) then either S (τ1 ) = S (τ2 ) and a ∩ dom(S ) = ∅, or no such
+S exists.
+– If R(τ1 ) = R(τ2 ) (and a ∩ dom(R) = ∅) then there exists some S such that
+R = S ◦ Ua (τ1 , τ2 ). In other words, unification produces the most general
+unifier.
+
+We also must define a new operation vars(Γ ) which extracts the scoped type
+variables listed in Γ .
+With this function, we can define three mutually recursive, partial functions
+that infer the type of an expression in a given context. These equations are to
+be read top-to-bottom.
+
+Visible Type Application (Extended version)
+
+Definition 19 (Algorithm V).
+(1) V(Γ, λx . e) = (S1 , S1 (b) → τ ) when
+V((Γ, x :b), e) = (S1 , τ )
+b fresh
+(2) V(Γ, e1 e2 ) = ( S3 ◦ S2 ◦ S1 , S3 (b)) when
+(S1 , τ1 ) = V(Γ, e1 )
+(S2 , τ2 ) = V(S1 (Γ ), e2 )
+S3 = Uvars(Γ ) (S2 (τ1 ), τ2 → b)
+b fresh
+(3) V(Γ, n) = (, Int)
+(4) V(Γ, e) = (S1 , τ ) when
+(S1 , ∀a. τ ) = V ∗ (Γ, e)
+a fresh
+
+(5) V ∗ (Γ, x ) = (, υ) when
+x :∀{a}. υ ∈ Γ
+a fresh
+(6) V ∗ (Γ, let x = e1 in e2 ) = (S2 ◦ S1 , υ2 ) when
+(S1 , σ1 ) = V gen (Γ, e1 )
+(S2 , υ2 ) = V ∗ ((S1 (Γ ), x :σ1 ), e2 )
+(7) V ∗ (Γ, e @τ ) = (S1 , υ1 [τ /a]) when
+(S1 , ∀a. υ1 ) = V ∗ (Γ, e)
+Γ `τ
+(8) V ∗ (Γ, (Λa.e : υ)) = (S2 ◦ S1 , υ) when
+Γ `υ
+∀a, b. τ = υ
+(S1 , τ 0 ) = V((Γ, a), e)
+S2 = Uvars(Γ ),a,b (τ, τ 0 )
+(9) V ∗ (Γ, e) = V(Γ, e)
+
+(10) V gen (Γ, e) = (S , ∀{a}. υ) when
+(S , υ) = V ∗ (Γ, e)
+a = ftv (υ) \ ftv (S (Γ ))
+
+Lemma 20 (Soundness of Algorithm V).
+
+45
+
+46
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+1. If V(Γ, e) = (S , τ ) then S (Γ ) v̀ e : τ
+2. If V ∗ (Γ, e) = (S , υ) then S (Γ ) `∗v e : υ
+3. If V gen (Γ, e) = (S , σ) then S (Γ ) `gen
+e:σ
+v
+In all cases, dom(S ) ∩ vars(Γ ) = ∅.
+Proof. By mutual induction on the structure of e. In the text of the proof, we will
+proceed in order of the clauses in the statement of the lemma, though technically,
+we should be considering the shape of e as the outer-level structure.
+1. Case e = λx . e: By (1), we have V(Γ, λx . e) = (S1 , S1 (b) → τ ), where
+(S1 , τ ) = V((Γ, x :b), e) and b is fresh. We must show S1 (Γ ) v̀ λx . e :
+S1 (b) → τ . The induction hypothesis tells us S1 (Γ, x :b) v̀ e : τ . Rewrite
+this as S1 (Γ ), x :S1 (b) v̀ e : τ . V_Abs then gives us the desired result.
+Case e = e1 e2 : By (2), we have V(Γ, e1 e2 ) = (S3 ◦ S2 ◦ S1 , S3 (b)), with
+several side conditions from the statement of V. Let R = S3 ◦ S2 ◦ S1 .
+We must show R(Γ ) v̀ e1 e2 : S3 (b). The induction hypothesis gives us
+S1 (Γ ) v̀ e1 : τ1 and S2 (S1 (Γ )) v̀ e2 : τ2 . Furthermore, we know that
+S3 (S2 (τ1 )) = S3 (τ2 → b).
+By the substitution lemma (Lemma 18), we know that R(Γ ) v̀ e1 :
+S3 (S2 (τ1 )) and R(Γ ) v̀ e2 : S3 (τ2 ). The first of these can be rewritten
+to R(Γ ) v̀ e1 : S3 (τ2 → b), or R(Γ ) v̀ e1 : S3 (τ2 ) → S3 (b). We now
+use V_App to get R(Γ ) v̀ e1 e2 : S3 (b) as desired. Note that dom(R) ∩
+vars(Γ ) = ∅ by virtue of the fact that S1 and S2 meet this condition (by
+the induction hypothesis) and S3 does by the properties of U.
+Case e = n: By (3), we have V(Γ, n) = (, Int). We must prove Γ v̀ n : Int,
+which we get from V_Int.
+Other cases: By (4), we have V(Γ, e) = (S1 , τ ), where (S1 , ∀a. τ ) =
+V ∗ (Γ, e). By the induction hypothesis, we have S1 (Γ ) `∗v e : ∀a. τ . By
+V_InstS, we have S1 (Γ ) v̀ e : τ [τ /a] for our choice of τ . Choose τ = a
+and we are done.
+2. Case e = x : By (5), we know V ∗ (Γ, x ) = (, υ) where x :∀{a}. υ ∈ Γ . We
+must show Γ `∗v x : υ. This is direct from V_Var, choosing τ = a.
+Case e = let x = e1 in e2 : By (6), we know V ∗ (Γ, let x = e1 in e2 ) = (S2 ◦
+S1 , υ2 ) where (S1 , σ1 ) = V gen (Γ, e1 ) and (S2 , υ2 ) = V ∗ ((S1 (Γ ), x :σ1 ), e2 ).
+We must show S2 (S1 (Γ )) `∗v let x = e1 in e2 : υ2 . The induction hypothesis gives us S1 (Γ ) `gen
+e1 : σ1 and S2 (S1 (Γ ), x :σ1 ) `∗v e2 : υ2 . Substitution
+v
+on the former gives us S2 (S1 (Γ )) `gen
+e1 : S2 (σ1 ) and we can rewrite
+v
+the latter as S2 (S1 (Γ )), x :S2 (σ1 ) `∗v e2 : υ2 . V_Let gives us our desired
+result.
+Case e = e0 @τ : By (7), we know V ∗ (Γ, e0 @τ ) = (S1 , υ1 [τ /b]) where
+(S1 , ∀a. υ1 ) = V ∗ (Γ, e). We must show S1 (Γ ) `∗v e0 @τ : υ1 [τ /b]. The
+induction hypothesis gives us S1 (Γ ) `∗v e0 : ∀a. υ1 , and we are done by
+V_TApp, noting that Γ ` τ implies S1 (Γ ) ` τ .
+Case e = (Λa.e0 : υ): By (8), we know V ∗ (Γ, (Λa.e0 : υ)) = (S2 ◦ S1 , υ)
+with side conditions from the statement of V, including ∀a, b. τ = υ.
+We must show S2 (S1 (Γ )) `∗v (Λa.e0 : υ) : υ. The induction hypothesis
+
+Visible Type Application (Extended version)
+
+47
+
+gives us S1 (Γ, a) v̀ e : τ 0 and we also know S2 (τ ) = S2 (τ 0 ). Substitution
+(Lemma 18) gives us S2 (S1 (Γ, a)) v̀ e : S2 (τ 0 ), which can be rewritten as
+S2 (S1 (Γ, a)) v̀ e : S2 (τ ). We know by Γ ` υ that ftv (τ ) ⊆ vars(Γ ), a, b.
+However, vars(Γ ), a, b ∩ dom(S2 ) = ∅, so S2 (τ ) = τ . We thus can use
+V_Annot and we are done.
+Other cases: By (9), we have V ∗ (Γ, e) = (S , τ ) where (S , τ ) = V(Γ, e).
+We must show S (Γ ) `∗v e : τ . The induction hypothesis gives us S (Γ ) v̀
+e : τ . We are done by V_Mono.
+3. All cases: By (10), we know V gen (Γ, e) = (S , ∀{a}. υ) where (S , υ) =
+e : ∀{a}. υ.
+V ∗ (Γ, e) and a = ftv (υ)\ftv (S (Γ )). We must show S (Γ ) `gen
+v
+The induction hypothesis gives us S (Γ ) `∗v e : υ, and we are done by
+V_Gen.
+Lemma 21 (Substitution/generalization). If a = ftv (υ) \ ftv (Γ ) and b =
+ftv (S (υ)) \ ftv (S (Γ )), then S (∀{a}. υ) ≤hmv ∀{b}. S (υ)
+Proof. We must show S (∀{a}. υ) ≤hmv ∀{b}. S (υ). Simplify this to
+∀{c}. S (υ[c/a]) ≤hmv ∀{b}. S (υ) where the c are fresh. (They are used to implement capture-avoidance.) By the definition of ≤hmv (HMV_InstG), this
+simplifies to S (υ[c/a])[τ /c] ≤hmv S (υ), for our choice of τ . Choose τ = S (a),
+yielding our wanted to be S (υ[c/a])[S (a)/c] ≤hmv S (υ). Simplifying again yields
+S (υ[c/a][a/c]) ≤hmv S (υ), which is the same as S (υ) ≤hmv S (υ). We are done
+by reflexivity of ≤hmv .
+.
+Lemma 22 (Completeness of Algorithm V). For all contexts Γ and substitutions Q such that dom(Q) ∩ vars(Γ ) = ∅:
+1. If Q(Γ ) v̀ e : τ , then V(Γ, e) = (S , τ 0 ) and there exists R such that Q =
+R ◦ S and τ = R(τ 0 ).
+2. If Q(Γ ) `∗v e : υ, then V ∗ (Γ, e) = (S , υ 0 ) and there exists R such that
+Q = R ◦ S and υ = R(υ 0 ).
+3. If Q(Γ ) `gen
+e : σ, then V gen (Γ, e) = (S , σ 0 ) and there exists R such that
+v
+Q = R ◦ S and R(σ 0 ) ≤hmv σ.
+In the Q = R ◦ S conclusions above, we ignore any differences on type variables
+that are conjured up as fresh during recursive calls. However, we require that
+dom(R) ∩ vars(Γ ) = ∅.
+Proof. We proceed by mutual induction on typing derivations. In each case, we
+must provide the following pieces:
+(i) The result of the call to V (such as (S , τ 0 ))
+(ii) The substitution R
+(iii) The fact that dom(R) ∩ vars(Γ ) = ∅
+(iv) The fact that Q = R ◦ S
+(v) The fact that, say, τ = R(τ 0 )
+These pieces will be labeled in each case.
+
+48
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Case V_Abs:
+Γ, x :τ1 v̀ e : τ2
+V_Abs
+Γ v̀ λx . e : τ1 → τ2
+We know that Q(Γ ), x :τ1 v̀ e : τ2 . Let Γ 0 = Γ, x :b (where b is fresh) and
+Q 0 = [τ1 /b] ◦ Q. Then, we can see that Q 0 (Γ 0 ) v̀ e : τ2 . We thus use the
+induction hypothesis to get V((Γ, x :b), e) = (S , τ20 ) along with R 0 such that
+Q 0 = R 0 ◦ S and τ2 = R 0 (τ20 ). We can thus see that
+(i) V(Γ, λx . e) = (S , S (b) → τ20 ).
+We have left only to provide R such that Q = R ◦ S and τ1 → τ2 =
+R(S (b) → τ20 ) = R(S (b)) → R(τ20 ).
+(ii) Choose R = R 0 .
+(iii) The domain restriction follows by the induction hypothesis.
+By functional extensionality, Q = R 0 ◦ S iff Q applied to any argument is
+the same as R 0 ◦ S applied to any argument. But in our supposition that
+b is fresh, b is outside the domain of possible arguments to Q; thus we can
+conclude
+(iv) Q = Q 0 = R 0 ◦ S , ignoring the fresh b.
+(v) We can also see that τ1 = Q 0 (b) by definition of Q 0 and that τ2 = R(τ20 )
+by the use of the induction hypothesis.
+Case V_App:
+Γ v̀ e1 : τ1 → τ2
+Γ v̀ e2 : τ1
+V_App
+Γ v̀ e1 e2 : τ2
+The induction hypothesis tells us that V(Γ, e1 ) = (S1 , τ10 ) with R1 such that
+Q = R1 ◦ S1 and τ1 → τ2 = R1 (τ10 ). Recall that we are assuming Q(Γ ) v̀
+e1 e2 : τ2 , which can now be written as R1 (S1 (Γ )) v̀ e1 e2 : τ2 . We thus know
+(by inversion) R1 (S1 (Γ )) v̀ e2 : τ1 . We then use the induction hypothesis
+on this fact, but choosing Q be R1 , not the Q originally used. This use of
+the induction hypothesis gives us V(S1 ( Q), e2 ) = (S2 , τ20 ) with R2 such that
+R1 = R2 ◦ S2 and τ1 = R2 (τ20 ). We now must find a substitution S30 that is
+a unifier of S2 (τ10 ) and τ20 → b for some fresh b. We know R1 (τ10 ) = τ1 → τ2
+and R2 (τ20 ) = τ1 . We can rewrite the former as R2 (S2 (τ10 )) = τ1 → τ2 .
+Choose S30 = [τ2 /b] ◦ R2 . We see that S30 (S2 (τ10 )) = S30 (τ20 → b) as required.
+We also must show that dom(S30 ) ∩ vars(Γ ) = ∅. This comes from the fact
+that b is fresh and that R2 satisfies the domain restriction by the induction
+hypothesis. We now know that Uvars(Γ ) (S2 (τ10 ), τ20 → b) will succeed with the
+most general unifier S3 . We thus know that
+(i) V(Γ, e1 e2 ) = (S3 ◦ S2 ◦ S1 , S3 (b)).
+We must now find R. By the fact that S3 is a most general unifier, we know
+that S30 = R ◦ S3 .
+(ii) Choose R to be this substitution, found by the most-general-unifier
+property.
+(iii) R must satisfy the domain restriction from the fact that both S3 and
+S30 do.
+
+Visible Type Application (Extended version)
+
+49
+
+(iv) Putting all the facts about substitutions together, we see that R ◦ S3 ◦
+S2 ◦ S1 = Q as needed (ignoring the action on the fresh b).
+We must finally show τ2 = R(S3 (b)) = S30 (b).
+(v) This comes from the definition of S3 .
+We are done.
+Case V_Int:
+V_Int
+Γ v̀ n : Int
+(i) V(Γ, n) = (, Int).
+(ii) Choose R = Q.
+(iii) By the assumed domain restriction on Q.
+(iv) Q = R ◦ , quite easily.
+(v) Q(Int) sure does equal Int.
+Case V_InstS:
+Γ `∗v e : ∀a. τ
+no other rule matches
+V_InstS
+Γ v̀ e : τ [τ /a]
+The induction hypothesis gives us V ∗ (Γ, e) = (S , ∀a. τ 0 ) with R 0 such that
+Q = R 0 ◦ S and R 0 (∀a. τ 0 ) = ∀a. τ . Note that we have liberally renamed
+bound variables here to ensure that the quantified variables a are the same
+in both cases. This is surely possible because the substitution R 0 cannot
+change the number of quantified variables (noting that τ 0 must not have
+any quantified variables itself). We thus know R 0 (τ 0 ) = τ and that a ∩
+dom(R 0 ) = ∅.
+(i) We can see that V(Γ, e) = (S , τ 0 ).
+(ii) Choose R to be the [τ /a] ◦ R 0 .
+(iii) The domain restriction is satisfied by the induction hypothesis and by
+the Barendregt convention applied to bound variables a.
+(iv) We can see that Q = R ◦ S as required (ignoring the action on the
+fresh a).
+We have already established that R 0 (τ 0 ) = τ . We must show that R(τ 0 ) =
+τ [τ /a].
+(v) This follows from our definition of R.
+We are done.
+Case V_Var:
+x :∀{a}. υ ∈ Γ
+V_Var
+Γ `∗v x : υ[τ /a]
+We know x :∀{a}. υ ∈ Q(Γ ). Thus, there exists υ 0 such that x :∀{a}. υ 0 ∈ Γ
+where Q(υ 0 ) = υ.
+(i) Thus, V ∗ (Γ, x ) = (, υ 0 ).
+(ii) Choose R = [τ /a] ◦ Q.
+(iii) The domain restriction is satisfied by the assumption of domain restriction on Q and the Barendregt convention applied to the bound a.
+(iv) Clearly, Q = R ◦ , ignoring the action on the fresh a.
+We must now show that R(υ 0 ) = υ[τ /a].
+(v) This is true by construction of R.
+
+50
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Case V_Let:
+Γ `gen
+e1 : σ 1
+Γ, x :σ1 `∗v e2 : υ2
+v
+V_Let
+Γ `∗v let x = e1 in e2 : υ2
+The induction hypothesis gives us V gen (Γ, e1 ) = (S1 , σ10 ) with R1 such
+that Q = R1 ◦ S1 and R1 (σ10 ) ≤hmv σ1 . We know (from inversion)
+that R1 (S1 (Γ )), x :σ1 `∗v e2 : υ2 . We also see that R1 (S1 (Γ ), x :σ10 ) ≤hmv
+R1 (S1 (Γ )), x :σ1 and thus that R1 (S1 (Γ ), x :σ10 ) `∗v e2 : υ2 , by context generalization (Lemma 16), which preserves heights of derivations. We thus use
+the induction hypothesis again to get V ∗ ((S1 (Γ ), x :σ10 ), e2 ) = (S2 , υ20 ) with
+R2 such that R1 = R2 ◦ S2 and υ2 = R2 (υ20 ).
+(i) We thus have V ∗ (Γ, let x = e1 in e2 ) = (S2 ◦ S1 , υ20 ).
+(ii) Choose R = R2 .
+(iii) The domain restriction is satisfied via the induction hypothesis.
+(iv) We can see that Q = R2 ◦ S2 ◦ S1 as desired.
+(v) We can further see that R2 (υ20 ) = υ2 as desired.
+Case V_TApp:
+Γ `τ
+Γ `∗v e : ∀a. υ
+V_TApp
+Γ `∗v e @τ : υ[τ /a]
+The induction hypothesis gives us V ∗ (Γ, e) = (S , υ 0 ) with R 0 such that
+Q = R 0 ◦ S and ∀a. υ = R 0 (υ 0 ). Because the substitution R 0 maps type
+variables only to monotypes, we know υ 0 must be ∀a. υ 00 , with R 0 (υ 00 ) = υ
+and a 6∈ dom(R 0 ).
+(i) We thus know V ∗ (Γ, e @τ ) = (S , υ 00 [τ /a]).
+(ii) Choose R = R 0 .
+(iii) The domain restriction is satisfied via the induction hypothesis.
+(iv) We already know Q = R 0 ◦ S .
+We must show R 0 (υ 00 [τ /a]) = υ[τ /a]. This can be reduced to
+R 0 (υ 00 )[R 0 (τ )/a] = υ[τ /a] by the fact that a 6∈ dom(R). Furthermore, we
+know τ is closed, so we can further reduce to R 0 (υ 00 )[τ /a] = υ[τ /a].
+(v) But we know R 0 (υ 00 ) = υ, so we are done.
+Case V_Annot:
+Γ `υ
+υ = ∀a, b. τ
+Γ, a v̀ e : τ
+a, b 6∈ ftv (Γ )
+V_Annot
+∗
+Γ `v (Λa.e : υ) : υ
+The induction hypothesis gives us V((Γ, a), e) = (S1 , τ 0 ) with R1 such that
+Q = R1 ◦ S1 , R1 (τ 0 ) = τ , and dom(R1 ) ∩ vars(Γ, a) = ∅. We must show
+that τ and τ 0 have a unifier. We can assume further (by the Barendregt
+convention) that b ∩dom(R1 ) = ∅. We also know that ftv (τ ) ⊆ vars(Γ ), a, b.
+Thus, R1 (τ ) = τ and R1 is a unifier of τ and τ 0 . Let S2 = Uvars(Γ ),a,b (τ, τ 0 )
+(which is now sure to exist).
+
+Visible Type Application (Extended version)
+
+51
+
+(i) We thus have V ∗ (Γ, (Λa.e : υ)) = (S2 ◦ S1 , υ).
+(ii) Choose R as determined by the fact that R1 = R ◦ S2 (gained from the
+most-general-unifier property).
+(iii) The domain restriction comes from the fact that S2 and R1 both satisfy
+even a stricter domain restriction than we need here.
+(iv) We thus see that Q = R ◦ S2 ◦ S1 as desired.
+(v) Furthermore, by the fact that υ is closed, we get R(υ) = υ, as desired.
+Case V_Mono:
+Γ v̀ e : τ
+no other rule matches
+V_Mono
+Γ `∗v e : τ
+The induction hypothesis gives us V(Γ, e) = (S , τ 0 ) with R such that Q =
+R ◦ S and R(τ 0 ) = τ .
+(i) We see that V ∗ (Γ, e) = (S , τ 0 ).
+(ii) Choose R to be the one we got from the induction hypothesis.
+(iii) The domain restriction is via the induction hypothesis.
+(iv) We see that Q = R ◦ S .
+(v) We see that R(τ 0 ) = τ .
+Case V_Gen:
+a = ftv (υ) \ ftv (Γ )
+Γ `∗v e : υ
+V_Gen
+Γ `gen
+e : ∀{a}. υ
+v
+The induction hypothesis gives us V ∗ (Γ, e) = (S , υ 0 ) with R such that Q =
+R ◦ S and R(υ 0 ) = υ. We know a = ftv (R(υ 0 )) \ ftv (R(S (Γ ))), and let
+a 0 = ftv (υ 0 ) \ ftv (S (Γ )).
+(i) We see that V gen (Γ, e) = (S , ∀{a 0 }. υ 0 ).
+(ii) Choose R as from the induction hypothesis.
+(iii) The domain restriction is via the induction hypothesis.
+(iv) We know Q = R ◦ S .
+We must show R(∀{a 0 }. υ 0 ) ≤hmv ∀{a}. υ
+(v) This is direct from Lemma 21.
+Proof (Proof of principal types for HMV (Theorem 4)). By completeness of V
+(Theorem 6), we have σ00 such that Γ `gen
+e : σ00 and σ00 ≤hmv σ. By completeness
+v
+of Algorithm V (Lemma 22), we have V gen (Γ, e) = (S , σp0 ) with R such that
+ = R ◦ S and R(σp0 ) ≤hmv σ00 . Let σp = R(σp0 ). By the soundness of Algorithm
+e :
+V (Lemma 20), we know that S (Γ ) `gen
+e : σp0 , or equivalently: S (Γ ) `gen
+v
+v
+S (σp ). By substitution, we can substitute through by R to get Γ `gen
+e
+:
+σ
+.
+By
+p
+v
+soundness of V (Theorem 5), we have Γ h̀mv e : σp . Recall that σp ≤hmv σ0 . But
+we assumed nothing about σ0 . Thus, σp is a principal type for e.
+Proof (Proof of decidability of System V (Theorem 7)). All that remains is to
+show that Algorithm V terminates. All cases in Algorithm V except for cases (4),
+(9), and (10) recur on a structural component of the input. We can observe that
+(4) and (9) cannot infinitely recur, because one of the other cases is guaranteed
+to intervene. Because (10) recurs from V gen (Γ, e) to V ∗ (Γ, e), it, too cannot loop.
+
+52
+
+F
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Higher-rank systems: properties of ≤b
+
+This section concerns the properties of the first order subsumption, higher-order
+instantiation relation, σ1 ≤b σ2 . For reference this relation is repeated in Fig. 12.
+σ1 ≤b σ2
+
+Higher-rank instantiation
+τ ≤b τ
+
+B_Refl
+
+υ3 ≤b υ1
+υ2 ≤b υ4
+B_Fun
+υ1 → υ2 ≤b υ3 → υ4
+φ1 [τ /b] ≤b φ2
+∀a, b. φ1 ≤b ∀a. φ2
+υ1 [τ /a] ≤b υ2
+
+B_InstS
+
+b 6∈ ftv (∀{a}. υ1 )
+
+∀{a}. υ1 ≤b ∀{b}. υ2
+
+B_InstG
+
+Fig. 12. Inner instantiation
+
+Lemma 23 (Monotypes are already instantiated). If τ1 ≤b τ2 then τ1 =
+τ2 .
+Proof. By inversion.
+Lemma 24 (Substitution for instantiation). If σ1 ≤b σ2 then S (σ1 ) ≤b
+S (σ2 ).
+Lemma 25 (Reflexivity for ≤b ). For all σ, σ ≤b σ.
+Lemma 26 (Transitivity for ≤b ). If σ1 ≤b σ2 and σ2 ≤b σ3 , then σ1 ≤b σ3 .
+Proof. Proof is by induction on H(σ2 ), where the H function is defined as follows:
+H(τ ) = 1
+H(υ1 − > υ2 ) = 1 + max(Hυ1 , Hυ2 )
+when at least one of υ1 and υ2
+is not a monotype
+H(∀a. φ) = 1 + H(φ)
+H(∀{a}. υ) = 1 + H(υ)
+Note that the H function is stable under substitution (replacing variables by
+monotypes).
+
+Visible Type Application (Extended version)
+
+53
+
+Case σ2 is τ , a monotype In this case, by Lemma 23, we know that σ3 must
+also be τ . So the result holds by assumption.
+Case σ2 is υ21 → υ22 By inversion, we know that σ1 is ∀{a}, b, c. υ11 → υ12
+such that υ21 ≤b υ11 [τ /a, c] and υ12 [τ /a, c] ≤b υ12 .
+We also know that σ3 is ∀{d }. υ31 → υ32 , such that υ31 ≤b υ21 and υ22 ≤b
+υ32 .
+By induction, we can show υ31 ≤b υ11 [τ /a, c] and υ12 [τ /a, c] ≤b υ32 .
+This lets us conclude that σ1 ≤b σ2 .
+Case σ2 is ∀a. φ2 By inversion, we know that σ1 is ∀{b}, a, c. φ1 such that
+φ1 [τ /b, c] ≤b φ2 .
+We also know that σ3 is ∀{d }, a 1 . φ3 where a = a 1 , a 2 and φ2 [τ 0 /a 2 ] ≤b φ3 .
+By substitution, we can show that φ1 [τ /b, c][τ 0 /a 2 ] ≤b φ2 [τ 0 /a 2 ].
+By induction, we then have φ1 [τ /b, c][τ 0 /a 2 ] ≤b φ3 . We can then derive
+σ1 ≤b σ3 to conclude.
+Case σ2 is ∀{a}. υ2 By inversion, we know that σ1 is ∀{b}. υ1 where
+υ1 [τ /b] ≤b υ2 .
+We also know that σ3 is ∀{c}. υ3 , where υ2 [τ 0 /a] ≤b υ3 .
+By substitution, we can show that υ1 [τ /b][τ 0 /a] ≤b υ2 [τ 0 /a]. Rewrite this as
+υ1 [τ [τ 0 /a]/b] ≤b υ2 [τ 0 /a].
+By induction, we have υ1 [τ [τ 0 /a]/b] ≤b υ3 .
+Therefore we can conclude ∀{b}. υ1 ≤b υ3 .
+
+G
+
+Higher-rank systems: properties of DSK System B
+
+This section considers the Higher-Rank type systems with deep-skolemization,
+described in Section 6.
+G.1
+
+Properties of Prenex conversion
+
+Lemma 27 (Instantiation and Prenex). If υ ≤b υ 0 and prenex (υ) = ∀a. ρ
+and prenex (υ 0 ) = ∀b. ρ0 , then ∀a. ρ ≤b ∀b. ρ0 and b ⊆ a.
+Proof. Proof is by induction on υ ≤b υ 0 .
+Case B_InstS:
+φ1 [τ /b] ≤b φ2
+∀a, b. φ1 ≤b ∀a. φ2
+
+B_InstS
+
+Say that prenex (υ) = ∀a, b, c. ρ01 where prenex (φ) = ∀c. ρ01 .
+This means that prenex (φ1 [τ /b]) = ∀c. ρ01 [τ /b] as τ do not contain quantifiers.
+Say also that prenex (υ 0 ) = ∀a, d . φ02 where prenex (φ2 ) = ∀d . ρ02 .
+By induction, we have that ρ01 [τ /b] ≤b ρ02 where d ⊆ c.
+Therefore we can conclude by B_InstS that
+∀a. ρ01 ≤b ∀b. ρ02
+
+54
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Case B_Fun:
+υ3 ≤b υ1
+υ 2 ≤b υ 4
+B_Fun
+υ1 → υ2 ≤b υ3 → υ4
+Note that prenex (υ1 → υ2 ) = ∀a. υ1 → ρ2 where ∀a. ρ2 = prenex (υ2 ) and
+the a are not free in υ1 . prenex (υ3 → υ4 ) = ∀b. υ3 → ρ4 where ∀b. ρ4 =
+prenex (υ4 ). So by induction, we have that ∀a. ρ2 ≤b ∀b. ρ4 and b ⊆ a.
+By inversion, we have that ρ2 [τ /a] ≤b ρ4 . From this we can derive υ1 →
+ρ2 [τ /a] ≤b υ3 → ρ4 and then ∀a. υ1 → ρ2 ≤b ∀b. υ3 → ρ4 .
+Case B_Refl: trivial.
+Lemma 28 (Prenex instantiates). If prenex (υ) = ∀a. ρ then υ ≤b ρ.
+Proof. Proof is by induction on υ. If υ is a monotype, we are done. If υ = υ1 →
+υ2 , then prenex (υ) = ∀a. υ1 → ρ2 where prenex (υ2 ) = ∀a. ρ2 . By induction,
+we know that υ2 ≤b ρ, so by B_Fun, we have υ1 → υ2 ≤b υ1 → ρ.
+If υ is a specified polytype, of the form ∀a. φ, then prenex (υ2 ) = ∀a, b. ρ02
+where prenex (φ) = ∀b. ρ02 . By induction, we know that ρ01 ≤b ρ02 . We can then
+show that ∀a, b. ρ01 ≤b ρ02 by B_InstS (and instantiating variables with themselves.)
+G.2
+
+Properties of DSK subsumption
+
+Lemma 29 (Substitution for higher-rank subsumption). If υ1 ≤dsk υ2
+then S (υ1 ) ≤dsk S (υ2 ). If σ1 ≤dsk υ2 then S (σ1 ) ≤dsk S (υ2 ).
+See Vytiniotis et al. [27] Lemma 2.7.
+Lemma 30 (Reflexivity for ≤dsk ). For all υ, υ ≤dsk υ.
+Proof. Vytiniotis et al., [27] Lemma 2.21.
+Lemma 31 (Transitivity for ≤dsk ). If υ1 ≤dsk υ2 and υ2 ≤dsk υ3 , then
+υ1 ≤dsk υ3 .
+Proof. Vytiniotis et al., [27] Lemma 2.22.
+Lemma 32 (Single skol admissible). If σ1 ≤dsk υ2 then σ1 ≤dsk ∀c. υ2 (when
+c are not free in σ1 ).
+Proof. Proof is by induction on σ1 ≤dsk υ2 .
+Case DSK_Refl: Direct by DSK_InstS.
+Case DSK_Fun:
+υ3 ≤dsk υ1
+υ2 ≤dsk ρ4
+DSK_Fun
+∗
+υ1 → υ2 ≤dsk υ3 → ρ4
+Say prenex (υ4 ) = ∀b. ρ. By inversion, we know that υ1 → υ2 ≤dsk υ3 → ρ.
+We also know that prenex (∀c. υ3 → υ4 ) = ∀c, b. υ3 → ρ, so we can conclude
+with DSK_Inst.
+
+Visible Type Application (Extended version)
+
+55
+
+Case DSK_Inst:
+prenex (υ2 ) = ∀c. ρ2
+φ1 [τ /a][τ 0 /b] ≤∗dsk ρ2
+∀{a}, b. φ1 ≤dsk υ2
+
+DSK_Inst
+
+We note that prenex (∀c. υ2 ) = ∀c, b. ρ2 , so we can just apply DSK_Inst.
+Case SB_Inst:
+prenex (υ2 ) = ∀c. ρ2
+φ1 [τ /a][τ 0 /b] ≤∗dsk ρ2
+DSK_Inst
+∀{a}, b. φ1 ≤dsk υ2
+Similar reasoning to DSK_Inst.
+Lemma 33 (Monotypes are instantiations). If σ ≤dsk τ then σ ≤b τ .
+Proof. Proof is by induction on σ ≤dsk τ . In each case the result holds directly
+by induction.
+Lemma 34 (DSK and prenex). For all υ, we have υ ≤dsk prenex (υ).
+Proof. Proof is by induction on υ.
+Lemma 35 (DSK Subsumption contains OL Subsumption). If υ1 ≤ol υ2
+then υ1 ≤dsk υ2 .
+Proof. Proof is by induction on the derivation.
+Case OL_B_ARefl: Trivial.
+Case OL_B_AFun: By induction.
+Case OL_B_AInstS:
+φ1 [τ /a] ≤ol φ2
+
+b 6∈ ftv (∀a. φ1 )
+
+∀a. φ1 ≤ol ∀b. φ2
+
+OL_B_AInstS
+
+By induction we know that φ1 [τ /b] ≤dsk φ2 . We want to show that
+∀a. φ1 ≤dsk ∀b. φ2 . Say prenex (φ2 ) = ∀c. ρ2 , then by DSK_Inst it suffices
+to show that φ1 [τ 0 /b] ≤dsk ρ2 . Note that as ∀c. ρ2 ≤dsk ρ2 , by transitivity,
+we can reduce this to showing φ1 [τ /b] ≤dsk prenex (φ2 ).
+We can finish, again by transitivity, by showing via Lemma 34, that φ2 ≤dsk
+prenex (φ2 ).
+Corollary 36 (DSK Subsumption contains Instantiation). If υ1 ≤b υ2
+then υ1 ≤dsk υ2 .
+Proof. See above and Lemma 48.
+Lemma 37 (Transitivity of Higher-Rank subsumption I). If σ1 ≤b σ2
+and σ2 ≤dsk υ3 , then σ1 ≤dsk υ3 .
+Proof. Follows from Lemmas 31 and 36.
+Lemma 38 (Transitivity of Higher-Rank subsumption II). If σ1 ≤dsk υ2
+and υ2 ≤b υ3 , then σ1 ≤dsk υ3 .
+Proof. Follows from Lemmas 31 and 36.
+
+56
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+G.3
+
+Substitution
+
+Although a more general substitution property is true for these systems, in this
+development we need only substitute for generalized type variables. Therefore,
+we state these lemmas is more restrictive forms.
+Lemma 39 (Substitution for System B). Assume that the domain of S is
+disjoint from the variables of Γ and from the free type variables of e.
+1. If Γ `b e ⇒ σ then Γ `b e ⇒ S (σ)
+2. If Γ `b e ⇐ υ then Γ `b e ⇐ S (υ)
+Lemma 40 (Substitution for System SB). Assume that the domain of S is
+disjoint from the variables of Γ and from the free type variables of e.
+1. If Γ s̀b e ⇒ φ then Γ s̀b e ⇒ S (φ).
+2. If Γ `∗sb e ⇒ υ then Γ `∗sb e ⇒ S (υ).
+gen
+3. If Γ `gen
+sb e ⇒ σ then Γ `
+sb e ⇒ S (σ).
+4. If Γ `∗sb e ⇐ υ then Γ `∗sb e ⇐ S (υ).
+5. If Γ s̀b e ⇐ ρ then Γ s̀b e ⇐ S (ρ).
+G.4
+
+Soundness of syntax-directed system
+
+Because of the differences between the syntax-directed and the declarative system, we need the following lemma about System B to prove the soundness of
+System SB.
+Lemma 41 (Prenex System B). If Γ `b e ⇐ ρ and prenex (φ) = ∀a. ρ then
+Γ `b e ⇐ φ.
+Proof. Case B_DAbs
+Γ, x :υ1 `b e ⇐ υ2
+B_DAbs
+Γ `b λx . e ⇐ υ1 → υ2
+In this case, because we are pushing in ρ, we have υ2 = ρ2 . We also know
+that prenex (φ) = ∀a. υ1 → ρ2 , so φ must be of the form υ1 → υ2 .
+Write υ2 as ∀a 1 . φ2 . We also know that prenex (υ2 ) = ∀a 1 , a 2 . ρ2 where
+prenex (φ2 ) = ∀a 2 . ρ2 .
+By induction, we have Γ, x :υ1 `b e ⇐ φ2 By (repeated) use of B_Skol, we
+have Γ, x :υ1 `b e ⇐ ∀a. φ2 By B_DAbs, we can then conclude Γ `b λx . e ⇐
+υ1 → ∀a. φ2 , which is what we wanted to show.
+Case B_DLet
+Γ `b e1 ⇒ σ1
+Γ, x :σ1 `b e2 ⇐ υ
+B_DLet
+Γ `b let x = e1 in e2 ⇐ υ
+This case holds by induction.
+
+Visible Type Application (Extended version)
+
+57
+
+Case B_Skol This case is impossible, as the conclusion does not have the
+form φ.
+Case B_Infer
+Γ `b e ⇒ σ1
+σ1 ≤dsk υ2
+B_Infer
+Γ `b e ⇐ υ2
+Here we know that υ2 is ρ. By inversion of σ ≤dsk ρ, we have σ =
+∀{a 1 }, b 1 . φ2 where where prenex (φ2 ) = ∀c. ρ and ρ2 [τ /a 1 ][τ 0 /b 1 ] ≤dsk ρ.
+However, as we also have prenex (φ) = ∀a. ρ, we can use the same information to conclude, σ ≤dsk φ, and then use B_Infer to show that Γ `b e ⇐ φ.
+Proof Soundness of System SB Lemma 8 states:
+1. If Γ s̀b e ⇒ φ then Γ `b e ⇒ φ.
+2. If Γ `∗sb e ⇒ υ then Γ `b e ⇒ υ.
+3. If Γ `gen
+b e ⇒ σ.
+sb e ⇒ σ then Γ `
+4. If Γ `∗sb e ⇐ υ then Γ `b e ⇐ υ.
+5. If Γ s̀b e ⇐ ρ then Γ `b e ⇐ ρ.
+Proof. Most of the cases of this lemma follow via straightforward induction.
+Cases SB_Spec, and SB_Var are similar to the cases for V_InstS and
+V_Var, so are not shown. We include selected cases below.
+Case SB_Annot:
+Γ `υ
+υ = ∀a, b. φ
+a, b 6∈ ftv (Γ )
+Γ, a `∗sb e ⇐ φ
+SB_Annot
+Γ `∗sb (Λa.e : υ) ⇒ υ
+By induction we know that Γ, a `b e ⇐ φ. By B_Annot, we can conclude
+Γ `b (Λa.e : υ) ⇒ υ.
+Case SB_Infer:
+Γ `∗sb e ⇒ υ1
+υ1 ≤dsk ρ2
+no other rule matches
+SB_Infer
+Γ s̀b e ⇐ ρ2
+By induction, we know that Γ `b e ⇒ υ1 . We would like to show that
+Γ `b e ⇐ ρ2 . This follows immediately by B_Infer.
+Case SB_DeepSkol
+prenex (υ) = ∀a. ρ
+a 6∈ ftv (Γ )
+Γ s̀b e ⇐ ρ
+SB_DeepSkol
+Γ `∗sb e ⇐ υ
+By induction, we have Γ `b e ⇐ ρ. Note that if prenex (υ) = ∀a. ρ and υ is of
+the form ∀a 0 . φ, then, by definition prenex (φ) = ∀a 00 . ρ and a = a 0 , a 00 . By
+the prenex lemma 41, we know that Γ `b e ⇐ φ. We can then use multiple
+applications of rule B_Skol to conclude Γ `b e ⇐ ∀a 0 . φ.
+
+58
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+G.5
+
+Completeness of syntax-directed system
+
+Lemma 42 (Context Generalization). Suppose Γ 0 ≤b Γ
+1. If Γ s̀b e ⇒ φ then there exists φ0 ≤b φ such that Γ 0 s̀b e ⇒ φ0 .
+2. If Γ `∗sb e ⇒ υ then there exists υ 0 ≤b υ such that Γ 0 `∗sb e ⇒ υ 0 .
+0
+0 gen
+0
+3. If Γ `gen
+sb e ⇒ σ then there exists σ ≤b σ such that Γ `
+sb e ⇒ σ .
+∗
+0
+0 ∗
+0
+4. If Γ `sb e ⇐ υ and υ ≤b υ then Γ `sb e ⇐ υ .
+5. If Γ s̀b e ⇐ ρ and ρ ≤b ρ0 then Γ 0 s̀b e ⇐ ρ.
+Proof. Proof is by induction on derivations.
+Case SB_Abs:
+
+Γ, x :τ `∗sb e ⇒ υ
+SB_Abs
+Γ s̀b λx . e ⇒ τ → υ
+
+By induction, we know that Γ 0 , x :τ `∗sb e ⇒ υ 0 for υ 0 ≤b υ. Therefore,
+Γ 0 s̀b λx . e ⇒ τ → υ 0 and, by SB_Fun, τ → υ 0 ≤b τ → υ.
+Case SB_Int:
+SB_Int
+Γ s̀b n ⇒ Int
+Trivial.
+Case SB_InstS:
+Γ `∗sb e ⇒ ∀a. φ
+no other rule matches
+SB_InstS
+Γ s̀b e ⇒ φ[τ /a]
+By induction, we know that Γ `∗sb e ⇒ υ 0 where υ 0 ≤b ∀a. φ. By inversion,
+we know that υ 0 must be of the form ∀a, b. φ0 where φ0 [τ 0 /b] ≤b φ. By
+SB_InstS, we can conclude Γ `∗sb e ⇒ (φ0 [τ 0 /b])[τ /a]. We also need to
+show that (φ0 [τ 0 /b])[τ /a] ≤b φ[τ /a], which follows by substitution (Lemma
+24).
+Case SB_Var:
+x :∀{a}. υ ∈ Γ
+SB_Var
+Γ `∗sb x ⇒ υ[τ /a]
+We know that x :σ ∈ Γ , where σ ≤b ∀{a}. υ. So by inversion, σ must
+be ∀{b}. υ 0 such that υ 0 [τ 0 /b] ≤b υ. Therefore, by substitution lemma 24,
+υ 0 [τ 0 /b][τ /a] ≤b υ[τ /a]. As we know that the a are not free in υ 0 , we can
+rewrite the left hand side as: υ 0 [τ 0 [τ /a]/b], and choose those types in the use
+of SB_Var.
+Case SB_App:
+Γ s̀b e1 ⇒ υ1 → υ2
+Γ `∗sb e2 ⇐ υ1
+SB_App
+∗
+Γ `sb e1 e2 ⇒ υ2
+By induction we have Γ 0 s̀b e1 ⇒ φ such that φ ≤b υ1 → υ2 . By inversion,
+this means that φ must be of the form υ10 → υ20 where υ1 ≤b υ10 and υ20 ≤b υ2 .
+By induction, we have Γ 0 `∗sb e2 ⇐ υ10 . So we can conclude by SB_App.
+
+Visible Type Application (Extended version)
+
+59
+
+Case SB_Let:
+Γ `gen
+Γ, x :σ1 `∗sb e2 ⇒ υ2
+sb e1 ⇒ σ1
+SB_Let
+Γ `∗sb let x = e1 in e2 ⇒ υ2
+0
+0
+0
+0 ∗
+By induction Γ 0 `gen
+sb
+sb e1 ⇒ σ1 for σ1 ≤b σ1 . By induction (again), Γ , x :σ1 `
+e2 ⇒ υ20 for υ20 ≤b υ2 . So we can conclude by SB_Let.
+Case SB_TApp:
+Γ `τ
+Γ `∗sb e ⇒ ∀a. υ
+SB_TApp
+Γ `∗sb e @τ ⇒ υ[τ /a]
+
+By induction Γ 0 `∗sb e ⇒ υ 0 where υ 0 ≤b ∀a. υ. By inversion, υ 0 is of the form
+∀a. υ1 where υ1 ≤b υ. By substitution, υ1 [τ /a] ≤b υ[τ /a].
+Case SB_Annot:
+Γ `υ
+υ = ∀a, b. φ
+Γ, a `∗sb e ⇐ φ
+a, b 6∈ ftv (Γ )
+SB_Annot
+∗
+Γ `sb (Λa.e : υ) ⇒ υ
+By induction, we have Γ 0 , a `∗sb e ⇐ φ, so we can use SB_Annot to conclude
+Γ 0 `∗sb e ⇒ υ.
+Case SB_Phi:
+Γ s̀b e ⇒ φ
+no other rule matches
+SB_Phi
+Γ `∗sb e ⇒ φ
+Holds directly by induction.
+Case SB_Gen:
+Γ `∗sb e ⇒ υ
+a = ftv (υ) \ ftv (Γ )
+SB_Gen
+Γ `gen
+e
+⇒ ∀{a}. υ
+sb
+By induction, we have Γ 0 `∗sb e ⇒ υ 0 for υ 0 ≤b υ. Let b = ftv (υ 0 ) \ ftv (Γ ). We
+want to prove that ∀{b}. υ 0 ≤b ∀{a}. υ. This holds by B_InstG, choosing
+τ = a.
+Case SB_DAbs:
+Γ, x :υ1 `∗sb e ⇐ ρ2
+SB_DAbs
+Γ s̀b λx . e ⇐ υ1 → ρ2
+Let Γ 0 ≤b Γ and υ1 → ρ2 ≤b υ 0 be arbitrary. By inversion, we know that υ 0
+is υ10 → υ20 where υ10 ≤b υ1 and ρ2 ≤b υ20 .
+By inversion, we know that υ20 must be of the form ρ02 , as ≤b cannot introduce specified quantifiers.
+By induction, we know that Γ 0 , x :υ10 `∗sb e ⇐ ρ02 .
+So we can conclude by SB_DAbs.
+
+60
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Case SB_Infer:
+Γ `∗sb e ⇒ υ1
+υ1 ≤dsk ρ2
+no other rule matches
+SB_Infer
+Γ s̀b e ⇐ ρ2
+Let Γ 0 ≤b Γ and ρ2 ≤b ρ0 be arbitrary. By induction, we know that Γ 0 `∗sb e ⇒
+υ 0 for υ 0 ≤b υ1 . We want to show that υ 0 ≤dsk ρ0 . This holds by lemmas 37
+and 38.
+Case SB_DLet:
+Γ `gen
+Γ, x :σ1 s̀b e2 ⇐ ρ2
+sb e1 ⇒ σ1
+SB_DLet
+Γ s̀b let x = e1 in e2 ⇐ ρ2
+0
+Let Γ 0 ≤b Γ and ρ2 ≤b ρ0 be arbitrary. By induction, we have Γ 0 `gen
+sb e1 ⇒ σ1
+for σ10 ≤b σ1 . By induction (again), Γ 0 , x :σ10 `∗sb e2 ⇐ ρ0 . So we can conclude
+by SB_DLet.
+Case SB_DeepSkol
+
+prenex (υ) = ∀a. ρ
+a 6∈ ftv (Γ )
+Γ s̀b e ⇐ ρ
+SB_DeepSkol
+Γ `∗sb e ⇐ υ
+Let Γ 0 ≤b Γ and υ ≤b υ 0 be arbitrary. Let prenex (υ 0 ) = ∀a 0 . ρ0 . By
+Lemma 28, we know that ρ ≤b ρ0 .
+So by induction, Γ 0 s̀b e ⇐ ρ0
+Therefore, we can use SB_DeepSkol to conclude.
+Proof of Completeness of System SB Lemma 9 states:
+0
+0
+1. If Γ `b e ⇒ σ then Γ `gen
+sb e ⇒ σ where σ ≤b σ.
+∗
+2. If Γ `b e ⇐ υ then Γ `sb e ⇐ υ.
+
+Proof. Most cases of this lemma either follow by induction, or are analogous to
+the completeness lemma for System V.
+Case B_Var
+x :σ ∈ Γ
+B_Var
+Γ `b x ⇒ σ
+Suppose σ is for the form ∀{a}. υ. Then we use a to instantiate the variables
+a. We know these a are not free in Γ by the Barendregt convention. It
+may be the case that generalization quantifies over more variables, i.e. a ⊆
+a 0 = ftv (υ) \ ftv (Γ ), leading to a more general result type. However, that is
+permitted by the statement of the theorem.
+
+Visible Type Application (Extended version)
+
+61
+
+Case B_Abs
+Γ, x :τ `b e ⇒ υ
+B_Abs
+Γ `b λx . e ⇒ τ → υ
+0
+0
+The induction hypothesis gives us Γ, x :τ `gen
+sb e ⇒ ∀{a}. υ where ∀{a}. υ ≤b
+gen
+∗
+0
+υ. Inverting `sb gives us Γ, x :τ `sb e ⇒ υ and inverting ≤b gives us
+υ 0 [τ /a] ≤b υ. We can then substitute and use SB_Abs to get Γ s̀b λx . e ⇒
+τ → υ 0 [τ /a]. Generalizing, we get Γ `gen
+λx . e ⇒ ∀{a, a 0 }. τ → υ 0 [τ /a]
+sb
+0
+where the new variables a come from generalizing τ and the τ 0 . We are
+done because (τ → υ 0 )[τ /a] ≤b τ → υ and so ∀{a, a 0 }. τ → υ 0 ≤b τ → υ
+Case B_App
+
+Γ `b e1 ⇒ υ1 → υ2
+Γ `b e2 ⇐ υ1
+B_App
+Γ `b e1 e2 ⇒ υ2
+By induction we have Γ `gen
+sb e1 ⇒ σ for some σ ≤b υ1 → υ2 .
+So by inversion σ = ∀{a}, b. υ10 → υ20 , where (υ10 → υ20 )[τ /a][τ 0 /b] ≤b υ1 →
+υ2 and υ1 ≤b υ10 [τ /a][τ 0 /b] and υ20 [τ /a][τ 0 /b] ≤b υ2 .
+∗
+0
+0
+Also by inversion of `gen
+sb e1 ⇒ ∀b. υ1 → υ2 and that the
+sb , we know that Γ `
+a are not free in Γ or e1 .
+By substitution, we have Γ `∗sb e1 ⇒ ∀b. (υ10 → υ20 )[τ /a]
+And by SB_InstS, we have Γ `∗sb e1 ⇒ (υ10 → υ20 )[τ /a][τ 0 /b].
+By induction we have Γ `∗sb e2 ⇐ υ10 and by lemma 55, we know that Γ `∗sb
+e2 ⇐ υ10 [τ /a][τ 0 /b].
+So we can conclude Γ `∗sb e1 e2 ⇐ υ20 [τ /a][τ 0 /b].
+Case B_Let
+Γ `b e1 ⇒ σ1
+Γ, x :σ1 `b e2 ⇒ σ
+B_Let
+Γ `b let x = e1 in e2 ⇒ σ
+The induction hypothesis gives us Γ `gen
+e1 ⇒ σ10 with σ10 ≤b σ1 . The
+sb
+gen
+induction hypothesis also gives us Γ, x :σ1 `sb e2 ⇒ σ2 with σ20 ≤b σ2 . Use
+00
+00
+0
+Lemma 55 to get Γ, x :σ10 `gen
+sb e2 ⇒ σ2 where σ2 ≤b σ2 .
+00
+0 ∗
+Let σ2 = ∀{b}. υ where b = ftv (υ)\ftv (Γ ). Inverting `gen
+sb
+sb gives us Γ, x :σ1 `
+∗
+e2 ⇒ υ. We then use SB_Let to get Γ `sb let x = e1 in e2 ⇒ υ. Generalizing
+gives us Γ `gen
+sb let x = e1 in e2 ⇒ ∀{b}. υ.
+Transitivity of ≤b (Lemma 26) gives us ∀{b}. υ ≤hmv σ2 .
+Case B_Int
+B_Int
+Γ `b n ⇒ Int
+Trivial.
+Case B_TApp
+Γ `τ
+Γ `b e ⇒ ∀a. υ
+B_TApp
+Γ `b e @τ ⇒ υ[τ /a]
+∗
+0
+The induction hypothesis (after inverting `gen
+sb e ⇒ ∀a. υ ,
+sb ) gives us Γ `
+0
+0
+where b = ftv (∀a. υ ) \ ftv (Γ ) and υ [τ /b] ≤b υ. Applying SB_TApp
+
+62
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+gives us Γ `∗sb e @τ ⇒ υ 0 [τ /a], and SB_Gen gives us Γ `gen
+e @τ ⇒
+sb
+∀{c}. υ 0 [τ /a] where c = ftv (υ 0 [τ /a]) \ ftv (Γ ). We want to show that
+∀{c}. υ 0 [τ /a] ≤b υ[τ /a], which follows when there is some τ 0 , such that
+υ 0 [τ /a][τ 0 /c] ≤b υ[τ /a].
+This is equivalent to exchanging the substiution, i.e. finding a τ 0 such that
+υ 0 [τ 0 /c][τ /a] ≤b υ[τ /a].
+By Substitution (Lemma 24), we have υ 0 [τ /b][τ /a] ≤b υ[τ /a]. We also know
+that the b are a subset of the c. So we can choose τ 0 to be τ for the b, and
+the remaining c elsewhere, and we are done.
+Case B_Annot
+Γ `υ
+υ = ∀a, b. φ
+a, b 6∈ ftv (Γ )
+Γ, a `b e ⇐ φ
+B_Annot
+Γ `b (Λa.e : υ) ⇒ υ
+By induction, we have Γ, a `∗sb e ⇐ φ. We can conclude by SB_Annot.
+Case B_Gen
+Γ `b e ⇒ σ
+a 6∈ ftv (Γ )
+B_Gen
+Γ `b e ⇒ ∀{a}. σ
+0
+0
+The induction hypothesis gives us Γ `gen
+sb e ⇒ σ where σ ≤b σ. We know
+0
+0
+σ ≤b ∀{a}. σ. In other words, if σ = ∀{b}. υ1 and σ = ∀{c}. υ2 , we have
+some τ such that υ1 [τ /b] = υ2 . By the definition of ≤b we can use these
+same τ to show that σ 0 ≤b ∀{a, c}. υ2 .
+Case B_Sub
+Γ `b e ⇒ σ1
+σ1 ≤b σ2
+B_Sub
+Γ `b e ⇒ σ2
+0
+0
+The induction hypothesis gives us Γ `gen
+sb e ⇒ σ where σ ≤b σ1 . By transitivity of ≤b , we are done.
+Case B_DAbs
+Γ, x :υ1 `b e ⇐ υ2
+B_DAbs
+Γ `b λx . e ⇐ υ1 → υ2
+
+By induction, we have that Γ, x :υ1 `∗sb e ⇐ υ2 .
+By inversion, we have prenex (υ2 ) = ∀a. ρ and Γ, x :υ1 s̀b e ⇐ ρ.
+Therefore by SB_DAbs, we can conclude Γ `∗sb λx . e ⇐ υ1 → ρ, and by
+SB_DeepSkol, we know Γ `∗sb λx . e ⇐ υ1 → υ2 .
+Case B_DLet
+Γ `b e1 ⇒ σ1
+Γ, x :σ1 `b e2 ⇐ υ
+B_DLet
+Γ `b let x = e1 in e2 ⇐ υ
+By induction we have Γ, x :σ1 `∗sb e2 ⇐ υ. Also by induction, there is some
+0
+σ 0 ≤b σ1 , such that Γ `gen
+sb e ⇒ σ . By context generalization, we know that
+0 ∗
+Γ, x :σ1 `sb e2 ⇐ υ. So we can use SB_DLet to conclude.
+
+Visible Type Application (Extended version)
+
+63
+
+Case B_Infer
+Γ `b e ⇒ σ1
+σ1 ≤dsk υ2
+B_Infer
+Γ `b e ⇐ υ2
+In this case, we know that σ1 ≤dsk υ2 . We would like to show that Γ `∗sb e ⇐
+υ2 . Suppose prenex (υ2 ) = ∀a. ρ, by rule SB_DeepSkol, it suffices to show
+Γ s̀b e ⇐ ρ.
+Suppose σ1 is ∀{b}. υ1 . By inversion of σ1 ≤dsk υ2 , we know that υ1 [τ 0 /b] ≤dsk
+ρ.
+0
+By induction, there is some σ 0 ≤b σ1 , such that Γ `gen
+sb e ⇒ σ . By inversion
+∗
+0
+0
+0
+υ
+and
+that
+Γ
+`
+of `gen
+we
+know
+that
+σ
+is
+of
+the
+form
+∀{a}.
+sb e ⇒ υ .
+sb
+By inversion of σ 0 ≤b σ1 , we know that υ 0 [τ /a] ≤b υ1 . By substitution,
+this means υ 0 [τ /a][τ 0 /b] ≤b υ1 [τ 0 /b]. By the Barendregt convention, the b
+can appear in the τ but not in υ 0 . So we can rewrite this substitution as
+υ 0 [τ [τ 0 /b]/a]. We can then substitute (as the a were generalized) Γ `∗sb e ⇒
+υ 0 [τ [τ 0 /b]/a].
+By transitivity (Lemma 37) we know that υ 0 [τ [τ 0 /b]/a] ≤dsk ρ. So we can
+conclude Γ s̀b e ⇐ ρ using SB_Infer.
+Case B_Skol
+Γ `b e ⇐ υ
+a 6∈ ftv (Γ )
+B_Skol
+Γ `b e ⇐ ∀a. υ
+By induction, we have Γ `∗sb e ⇐ υ. We would like to conclude Γ `∗sb e ⇐
+∀a. υ. By inversion, we have Γ s̀b e ⇐ ρ where prenex (υ) = ∀a. ρ. However,
+this means that prenex (∀a. υ) = ∀a, a. ρ. Therefore, we can conclude using
+SB_DeepSkol.
+Unlike System V, we have not shown that the algorithm determined by System SB computes principal types. We believe that all of the complexities of that
+proof are already present in the corresponding proofs about System V and the
+extensive proofs for the bidirectional type system of GHC [27].
+
+64
+
+H
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Higher-rank systems: OL variant
+
+This section concerns the properties of a higher-rank type system that does not
+include deep skolemization and provides an alternative treatment of scoped type
+variables.
+We present this system mainly for comparison with Dunfield/Krishnaswami [10]
+(see below). However, it also shows that the deep-skolemization relation is not
+an essential component of our type system. Instead of ≤dsk , it uses the OderskyLäufer subsmption relation shown in Figure 13.
+The only difference between this system and the DSK version of System B,
+is the use of this relation in the B_Infer rule and the treatment of scoped
+type variables in the B_Annot and B_Skol rules. See Figure 14. The syntaxdirected version of the system is in Figure 15. It differs from System SB in that
+it again uses the ≤ol relation, introduces scoped type variables at SB_Skol and
+does not do deep-skolemization in the checking rule for polytypes.
+A note on scoped type variables The alternative mechanism for scoped type
+variables leads to some “strange” binding behavior. In particular, if y has the
+following type in the context
+y : (∀a. a → a) → Int
+then the expression
+y (λx . (x : a))
+would be well typed, even though the specification of y’s type could be very far
+from this application. Likewise, we only introduce top-level variables into scope.
+In particular,
+(λy. λx . (x : a) : Int → ∀a. a → a)
+would be well-typed if we introduced scoped type variables in rule B_Skol, but
+is rejected by system B.
+υ1 ≤ol υ2
+τ ≤ol τ
+
+OL_B_ARefl
+
+υ3 ≤ol υ1
+υ2 ≤ol υ4
+OL_B_AFun
+υ1 → υ2 ≤ol υ3 → υ4
+φ1 [τ /a] ≤ol φ2
+
+b 6∈ ftv (∀a. φ1 )
+
+∀a. φ1 ≤ol ∀b. φ2
+
+OL_B_AInstS
+
+Fig. 13. Subsumption in the Odersky-Läufer type system
+
+Visible Type Application (Extended version)
+
+Γ b̀ e ⇒ σ
+
+Synthesis rules for System B
+x :σ ∈ Γ
+OL_B_Var
+Γ `b x ⇒ σ
+Γ, x :τ b̀ e ⇒ υ
+OL_B_Abs
+Γ `b λx . e ⇒ τ → υ
+Γ b̀ e1 ⇒ υ1 → υ2
+Γ b̀ e2 ⇐ υ1
+OL_B_App
+Γ `b e1 e2 ⇒ υ2
+Γ b̀ e1 ⇒ σ1
+Γ, x :σ1 b̀ e2 ⇒ σ
+OL_B_Let
+Γ `b let x = e1 in e2 ⇒ σ
+Γ `b n ⇒ Int
+
+OL_B_Int
+
+Γ `τ
+Γ b̀ e ⇒ ∀a. υ
+OL_B_TApp
+Γ `b e @τ ⇒ υ[τ /a]
+Γ `υ
+Γ b̀ e ⇐ υ
+OL_B_Annot
+Γ `b (e : υ) ⇒ υ
+Γ b̀ e ⇒ σ
+a 6∈ ftv (Γ )
+OL_B_Gen
+Γ `b e ⇒ ∀{a}. σ
+Γ b̀ e ⇒ σ1
+σ1 ≤b σ2
+OL_B_Sub
+Γ `b e ⇒ σ2
+Γ b̀ e ⇐ υ
+Γ, x :υ1 b̀ e ⇐ υ2
+OL_B_DAbs
+Γ `b λx . e ⇐ υ1 → υ2
+Γ b̀ e1 ⇒ σ1
+Γ, x :σ1 b̀ e2 ⇐ υ
+OL_B_DLet
+Γ `b let x = e1 in e2 ⇐ υ
+Γ, a b̀ e ⇐ υ
+a 6∈ ftv (Γ )
+OL_B_Skol
+Γ `b e ⇐ ∀a. υ
+Γ b̀ e ⇒ υ1
+υ1 ≤ol υ2
+OL_B_Infer
+Γ `b e ⇐ υ2
+
+Fig. 14. Declarative specification of System OL-B
+
+65
+
+66
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Γ s̀b e ⇒ φ
+∗
+
+Γ, x :τ `sb e ⇒ υ
+OL_SB_Abs
+Γ s̀b λx . e ⇒ τ → υ
+Γ s̀b n ⇒ Int
+
+OL_SB_Int
+
+∗
+
+Γ `sb e ⇒ ∀a. φ
+no other rule matches
+OL_SB_InstS
+Γ s̀b e ⇒ φ[τ /a]
+∗
+
+Γ `sb e ⇒ υ
+x :∀{a}. υ ∈ Γ
+OL_SB_Var
+Γ `∗sb x ⇒ υ[τ /a]
+∗
+
+Γ s̀b e1 ⇒ υ1 → υ2
+Γ `sb e2 ⇐ υ1
+OL_SB_App
+Γ `∗sb e1 e2 ⇒ υ2
+∗
+
+gen
+
+Γ, x :σ1 `sb e2 ⇒ υ2
+Γ `sb e1 ⇒ σ1
+OL_SB_Let
+∗
+Γ `sb let x = e1 in e2 ⇒ υ2
+∗
+
+Γ `τ
+Γ `sb e ⇒ ∀a. υ
+OL_SB_TApp
+Γ `∗sb e @τ ⇒ υ[τ /a]
+∗
+
+Γ `υ
+Γ `sb e ⇐ υ
+OL_SB_Annot
+∗
+Γ `sb (e : υ) ⇒ υ
+Γ s̀b e ⇒ φ
+no other rule matches
+OL_SB_Phi
+Γ `∗sb e ⇒ φ
+gen
+
+Γ `sb e ⇒ σ
+∗
+
+a = ftv (υ) \ ftv (Γ )
+Γ `sb e ⇒ υ
+OL_SB_Gen
+gen
+Γ `sb e ⇒ ∀{a}. υ
+Γ s̀b e ⇐ φ
+∗
+
+Γ, x :υ1 `sb e ⇐ υ2
+OL_SB_DAbs
+Γ s̀b λx . e ⇐ υ1 → υ2
+gen
+
+Γ `sb e1 ⇒ σ1
+Γ, x :σ1 s̀b e2 ⇐ φ2
+OL_SB_DLet
+Γ s̀b let x = e1 in e2 ⇐ φ2
+∗
+
+Γ `sb e ⇒ υ1
+υ1 ≤ol φ2
+no other rule matches
+OL_SB_Infer
+Γ s̀b e ⇐ φ2
+∗
+
+Γ `sb e ⇐ υ
+Γ, a s̀b e ⇐ φ
+a 6∈ ftv (Γ )
+OL_SB_Skol
+Γ `∗sb e ⇐ ∀a. φ
+
+Fig. 15. Syntax-directed specification of System OL-SB
+
+Visible Type Application (Extended version)
+
+H.1
+
+67
+
+Properties of OL subsumption
+
+Lemma 43 (Substitution). If υ1 ≤ol υ2 then S (υ1 ) ≤ol S (υ2 ).
+Proof. Vytiniotis et al., Lemma 2.1 ([27])
+Lemma 44 (Reflexivity for ≤ol ). For all υ, υ ≤ol υ.
+Proof. Vytiniotis et al., Lemma 2.2 ([27])
+Lemma 45 (Transitivity for ≤ol ). If υ1 ≤ol υ2 and υ2 ≤ol υ3 , then υ1 ≤ol υ3 .
+Proof. Vytiniotis et al., Lemma 2.3 ([27])
+Lemma 46 (Single skol admissible). If υ1 ≤ol υ2 then υ1 ≤ol ∀c. υ2 (when
+c is not free in υ1 ).
+Proof. Proof is by induction on υ1 ≤ol υ2 .
+Lemma 47 (Monotypes are instantiations). If υ ≤ol τ then υ ≤b τ .
+Proof. Proof is by induction on υ ≤ol τ . In each case the result holds directly by
+induction.
+Lemma 48 (Subsumption contains instantiation). If υ1 ≤b υ2 then υ1 ≤ol
+υ2 .
+Proof. Proof is by induction.
+Case B_Refl: Trivial
+Case B_Fun: By induction.
+Case B_InstS:
+φ1 [τ /b] ≤b φ2
+∀a, b. φ1 ≤b ∀a. φ2
+
+B_InstS
+
+By induction we know that φ1 [τ /b] ≤ol φ2 . We can rewrite this as
+φ1 [a/a][τ /b] ≤ol φ2 , and conclude by DSK_Inst.
+Lemma 49 (Transitivity of Higher-Rank subsumption I). If υ1 ≤b υ2
+and υ2 ≤ol υ3 , then υ1 ≤ol υ3 .
+Proof. Follows from Lemmas 45 and 48.
+Lemma 50 (Transitivity of Higher-Rank subsumption II). If υ1 ≤ol υ2
+and υ2 ≤b υ3 , then υ1 ≤ol υ3 .
+Proof. Follows from Lemmas 45 and 48.
+
+68
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+H.2
+
+Substitution
+
+Lemma 51 (Substitution for System B). Assume that the domain of S is
+disjoint from the variables of Γ or the free type variables of e.
+1. If Γ `b e ⇒ σ then Γ `b e ⇒ S (σ)
+2. If Γ `b e ⇐ υ then Γ `b e ⇐ S (υ)
+Lemma 52 (Substitution for System SB). Assume that the domain of S is
+disjoint from the variables of Γ or the free type variables of e.
+1. If Γ s̀b e ⇒ φ then Γ s̀b e ⇒ S (φ).
+2. If Γ `∗sb e ⇒ υ then Γ `∗sb e ⇒ S (υ).
+gen
+3. If Γ `gen
+sb e ⇒ σ then Γ `
+sb e ⇒ S (σ).
+∗
+∗
+4. If Γ `sb e ⇐ υ then Γ `sb e ⇐ S (υ).
+5. If Γ s̀b e ⇐ φ then Γ s̀b e ⇐ S (φ).
+H.3
+
+Other properties
+
+Lemma 53 (Monotypes are uninformative). If Γ `b e ⇐ τ then Γ `b e ⇒ τ .
+Proof. This follows because of the four checking rules, the first two have identical
+monotype versions, the third doesn’t apply to monotypes and the last follows
+by B_Sub and the fact that τ is an instantiation of σ (lemma 47).
+H.4
+
+Soundness of System SB
+
+Lemma 54 (Soundness of System SB).
+1. If Γ s̀b e ⇒ φ then Γ `b e ⇒ φ.
+2. If Γ `∗sb e ⇒ υ then Γ `b e ⇒ υ.
+3. If Γ `gen
+b e ⇒ σ.
+sb e ⇒ σ then Γ `
+4. If Γ `∗sb e ⇐ υ then Γ `b e ⇐ υ.
+5. If Γ s̀b e ⇐ φ then Γ `b e ⇐ φ.
+Proof. Most of the cases of this lemma follow via straightforward induction.
+Cases SB_Spec, and SB_Var are similar to the cases for V_InstS and
+V_Var.
+Case SB_Infer:
+Γ `∗sb e ⇒ υ1
+υ1 ≤ol φ2
+no other rule matches
+OL_SB_Infer
+Γ s̀b e ⇐ φ2
+By induction, we know that Γ `b e ⇒ υ1 . We can show that Γ `b e ⇐ φ2 by
+B_Infer.
+Case SB_Skol
+Γ, a s̀b e ⇐ φ
+a 6∈ ftv (Γ )
+OL_SB_Skol
+∗
+Γ `sb e ⇐ ∀a. φ
+By induction, we have Γ `b e ⇐ ρ. We can immediately use rule B_Skol to
+conclude.
+
+Visible Type Application (Extended version)
+
+H.5
+
+69
+
+Completeness of SB
+
+Generalizing and specializing syntax-directed derivations
+Lemma 55 (Context Generalization). Suppose Γ 0 ≤b Γ
+1. If Γ s̀b e ⇒ φ then there exists φ0 ≤b φ such that Γ 0 s̀b e ⇒ φ0 .
+2. If Γ `∗sb e ⇒ υ then there exists υ 0 ≤b υ such that Γ 0 `∗sb e ⇒ υ 0 .
+0
+0 gen
+0
+3. If Γ `gen
+sb e ⇒ σ then there exists σ ≤b σ such that Γ `
+sb e ⇒ σ .
+∗
+0
+0 ∗
+0
+4. If Γ `sb e ⇐ υ and υ ≤b υ then Γ `sb e ⇐ υ .
+5. If Γ s̀b e ⇐ φ and φ ≤b φ0 then Γ 0 s̀b e ⇐ φ.
+Proof. Proof is by induction on derivations.
+Case SB_Abs:
+
+Γ, x :τ `∗sb e ⇒ υ
+OL_SB_Abs
+Γ s̀b λx . e ⇒ τ → υ
+
+By induction, we know that Γ 0 , x :τ `∗sb e ⇒ υ 0 for υ 0 ≤b υ. Therefore,
+Γ 0 s̀b λx . e ⇒ τ → υ 0 and, by SB_Fun, τ → υ 0 ≤b τ → υ.
+Case SB_Int:
+OL_SB_Int
+Γ s̀b n ⇒ Int
+Trivial.
+Case SB_InstS:
+Γ `∗sb e ⇒ ∀a. φ
+no other rule matches
+OL_SB_InstS
+Γ s̀b e ⇒ φ[τ /a]
+By induction, we know that Γ `∗sb e ⇒ υ 0 where υ 0 ≤b ∀a. φ. By inversion,
+we know that υ 0 must be of the form ∀a, b. φ0 where φ0 [τ 0 /b] ≤b φ. By
+SB_InstS, we can conclude Γ `∗sb e ⇒ (φ0 [τ 0 /b])[τ /a]. We also need to
+show that (φ0 [τ 0 /b])[τ /a] ≤b φ[τ /a], which follows by substitution (Lemma
+24).
+Case SB_Var:
+x :∀{a}. υ ∈ Γ
+OL_SB_Var
+Γ `∗sb x ⇒ υ[τ /a]
+We know that x :σ ∈ Γ , where σ ≤b ∀{a}. υ. So by inversion, σ must be
+∀{b}. υ 0 such that υ 0 [τ 0 /b] ≤b υ. Therefore, by lemma 24, υ 0 [τ 0 /b][τ /a] ≤b
+υ[τ /a]. As we know that the a are not free in υ 0 , we can rewrite the left
+hand side as: υ 0 [τ 0 [τ /a]/b], and choose those types in the use of SB_Var.
+Case SB_App:
+Γ s̀b e1 ⇒ υ1 → υ2
+Γ `∗sb e2 ⇐ υ1
+OL_SB_App
+Γ `∗sb e1 e2 ⇒ υ2
+By induction we have Γ 0 s̀b e1 ⇒ φ such that φ ≤b υ1 → υ2 . By inversion,
+this means that φ must be of the form υ10 → υ20 where υ1 ≤b υ10 and υ20 ≤b υ2 .
+By induction, we have Γ 0 `∗sb e2 ⇐ υ10 [τ /b]. So we can conclude by SB_App.
+
+70
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Case SB_Let:
+Γ `gen
+Γ, x :σ1 `∗sb e2 ⇒ υ2
+sb e1 ⇒ σ1
+OL_SB_Let
+∗
+Γ `sb let x = e1 in e2 ⇒ υ2
+0
+0
+0
+0 ∗
+By induction Γ 0 `gen
+sb
+sb e1 ⇒ σ1 for σ1 ≤b σ1 . By induction (again), Γ , x :σ1 `
+0
+0
+e2 ⇒ υ2 for υ2 ≤b υ2 . So we can conclude by SB_Let.
+Case SB_TApp:
+
+Γ `τ
+Γ `∗sb e ⇒ ∀a. υ
+OL_SB_TApp
+Γ `∗sb e @τ ⇒ υ[τ /a]
+By induction Γ 0 `∗sb e ⇒ υ 0 where υ 0 ≤b ∀a. υ. By inversion, υ 0 is of the form
+∀a. υ1 where υ1 ≤b υ. By substitution, υ1 [τ /a] ≤b υ[τ /a].
+Case SB_Annot:
+Γ `υ
+Γ `∗sb e ⇐ υ
+OL_SB_Annot
+Γ `∗sb (e : υ) ⇒ υ
+Holds directly by induction.
+Case SB_Phi:
+Γ s̀b e ⇒ φ
+no other rule matches
+OL_SB_Phi
+Γ `∗sb e ⇒ φ
+Holds directly by induction.
+Case SB_Gen:
+a = ftv (υ) \ ftv (Γ )
+Γ `∗sb e ⇒ υ
+OL_SB_Gen
+gen
+Γ `sb e ⇒ ∀{a}. υ
+By induction, we have Γ 0 `∗sb e ⇒ υ 0 for υ 0 ≤b υ. Let b = ftv (υ 0 ) \ vars(Γ ).
+We want to prove that ∀{b}. υ 0 ≤b ∀{a}. υ. This holds by definition.
+Case SB_DAbs:
+Γ, x :υ1 `∗sb e ⇐ υ2
+OL_SB_DAbs
+Γ s̀b λx . e ⇐ υ1 → υ2
+Let Γ 0 ≤b Γ and υ1 → υ2 ≤b υ 0 be arbitrary. By inversion, we know that
+υ 0 is υ10 → υ20 where υ10 ≤b υ1 and υ2 ≤b υ20 . By induction, we know that
+Γ 0 , x :υ10 `∗sb e ⇐ υ20 . So we can conclude by SB_DAbs.
+Case SB_Infer:
+Γ `∗sb e ⇒ υ1
+υ1 ≤ol φ2
+no other rule matches
+OL_SB_Infer
+Γ s̀b e ⇐ φ2
+Let Γ 0 ≤b Γ and φ2 ≤b φ0 be arbitrary. By induction, we know that Γ 0 `∗sb
+e ⇒ υ 0 for υ 0 ≤b υ1 . We want to show that υ 0 ≤ol φ0 . This holds by lemmas 49
+and 50.
+
+Visible Type Application (Extended version)
+
+71
+
+Case SB_DLet:
+Γ `gen
+Γ, x :σ1 s̀b e2 ⇐ φ2
+sb e1 ⇒ σ1
+OL_SB_DLet
+Γ s̀b let x = e1 in e2 ⇐ φ2
+Let Γ 0 ≤b Γ and φ2 ≤b φ0 be arbitrary. By induction, we have Γ 0 `gen
+sb
+e1 ⇒ σ10 for σ10 ≤b σ1 . By induction (again), Γ 0 , x :σ10 `∗sb e2 ⇐ φ0 . So we can
+conclude by SB_DLet.
+Case SB_Skol:
+a 6∈ ftv (Γ )
+Γ, a s̀b e ⇐ φ
+OL_SB_Skol
+∗
+Γ `sb e ⇐ ∀a. φ
+Let Γ 0 ≤b Γ be arbitrary. Result holds by directly by induction and
+SB_Skol.
+Completeness theorem
+Lemma 56 (Completeness of System SB).
+0
+0
+1. If Γ `b e ⇒ σ then Γ `gen
+sb e ⇒ σ where σ ≤b σ.
+∗
+2. If Γ `b e ⇐ υ then Γ `sb e ⇐ υ.
+
+Proof. Most cases of this lemma either follow by induction, or are analogous
+to the completeness lemma for System V. We discuss the most novel cases are
+B_App, B_Annot, plus the checking rules.
+Case B_Var
+x :σ ∈ Γ
+OL_B_Var
+Γ `b x ⇒ σ
+Let σ be ∀{a}. υ. We can use the types a to instantiate the variables a. We
+know these a are not free in Γ by the Barendregt convention. It may be
+the case that generalization quantifies over more variables, i.e. a ⊆ a 0 =
+ftv (υ) \ vars(Γ ), leading to a more general result type. However, that is
+permitted by the statement of the theorem.
+Case B_Abs
+Γ, x :τ `b e ⇒ υ
+OL_B_Abs
+Γ `b λx . e ⇒ τ → υ
+0
+0
+The induction hypothesis gives us Γ, x :τ `gen
+sb e ⇒ ∀{a}. υ where ∀{a}. υ ≤b
+gen
+∗
+0
+υ. Inverting `sb gives us Γ, x :τ `sb e ⇒ υ and inverting ≤b gives us
+υ 0 [τ /a] ≤b υ. We can then substitute and use SB_Abs to get Γ s̀b λx . e ⇒
+λx . e ⇒ ∀{a, a 0 }. τ → υ 0 [τ /a]
+τ → υ 0 [τ /a]. Generalizing, we get Γ `gen
+sb
+0
+where the new variables a come from generalizing τ and the τ . We are done
+because (τ → υ 0 )[τ /a] ≤b τ → υ and so ∀{a, a 0 }. τ → υ 0 ≤b τ → υ
+
+72
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+
+Case B_App
+Γ `b e1 ⇒ υ1 → υ2
+Γ `b e2 ⇐ υ1
+OL_B_App
+Γ `b e1 e2 ⇒ υ2
+By induction we have Γ `gen
+sb e1 ⇒ σ for some σ ≤b υ1 → υ2 .
+So by inversion σ = ∀{a}, b. υ10 → υ20 , where (υ10 → υ20 )[τ /a][τ 0 /b] ≤b υ1 →
+υ2 and υ1 ≤b υ10 [τ /a][τ 0 /b] and υ20 [τ /a][τ 0 /b] ≤b υ2 .
+Also by inversion, we know that Γ `∗sb e1 ⇒ ∀b. υ10 → υ20 and that the a are
+not free in Γ or e1 .
+By substitution, we have Γ `∗sb e1 ⇒ ∀b. (υ10 → υ20 )[τ /a]
+And by SB_InstS, we have Γ `∗sb e1 ⇒ (υ10 → υ20 )[τ /a][τ 0 /b].
+By induction we have Γ `∗sb e2 ⇐ υ10 and by lemma 55, we know that Γ `∗sb
+e2 ⇐ υ10 [τ /a][τ 0 /b].
+So we can conclude Γ `∗sb e1 e2 ⇐ υ20 [τ /a][τ 0 /b].
+Case B_Let
+Γ `b e1 ⇒ σ1
+Γ, x :σ1 `b e2 ⇒ σ
+OL_B_Let
+Γ `b let x = e1 in e2 ⇒ σ
+The induction hypothesis gives us Γ `gen
+e1 ⇒ σ10 with σ10 ≤b σ1 . The
+sb
+gen
+induction hypothesis also gives us Γ, x :σ1 `sb e2 ⇒ σ2 with σ20 ≤b σ2 . Use
+00
+00
+0
+Lemma 55 to get Γ, x :σ10 `gen
+sb e2 ⇒ σ2 where σ2 ≤b σ2 .
+00
+Let σ2 = ∀{b}. υ where b = ftv (υ) \ vars(Γ ). Inverting `gen
+gives us
+sb
+Γ, x :σ10 `∗sb e2 ⇒ υ. We then use SB_Let to get Γ `∗sb let x = e1 in e2 ⇒ υ.
+Generalizing gives us Γ `gen
+sb let x = e1 in e2 ⇒ ∀{b}. υ.
+Transitivity of ≤b (Lemma 26) gives us ∀{b}. υ ≤hmv σ2 .
+Case B_Int
+OL_B_Int
+Γ `b n ⇒ Int
+Trivial.
+Case B_TApp
+Γ `τ
+Γ `b e ⇒ ∀a. υ
+OL_B_TApp
+Γ `b e @τ ⇒ υ[τ /a]
+∗
+0
+The induction hypothesis (after inverting `gen
+sb e ⇒ ∀a. υ ,
+sb ) gives us Γ `
+where b = ftv (∀a. υ 0 ) \ vars(Γ ) and υ 0 [τ /b] ≤b υ. Applying SB_TApp
+gives us Γ `∗sb e @τ ⇒ υ 0 [τ /a], and SB_Gen gives us Γ `gen
+e @τ ⇒
+sb
+∀{c}. υ 0 [τ /a] where c = ftv (υ 0 [τ /a]) \ vars(Γ ). We want to show that
+∀{c}. υ 0 [τ /a] ≤b υ[τ /a], which follows when there is some τ 0 , such that
+υ 0 [τ /a][τ 0 /c] ≤b υ[τ /a].
+This is equivalent to exchanging the substiution, i.e. finding a τ 0 such that
+υ 0 [τ 0 /c][τ /a] ≤b υ[τ /a].
+By Substitution (Lemma 24), we have υ 0 [τ /b][τ /a] ≤b υ[τ /a]. We also know
+that the b are a subset of the c. So we can choose τ 0 to be τ for the b, and
+the remaining c elsewhere, and we are done.
+
+Visible Type Application (Extended version)
+
+73
+
+Case B_Annot
+Γ `υ
+Γ `b e ⇐ υ
+OL_B_Annot
+Γ `b (e : υ) ⇒ υ
+The induction hypothesis gives us Γ `b e ⇐ υ, so the result immediately
+follows.
+Case B_Gen
+Γ `b e ⇒ σ
+a 6∈ ftv (Γ )
+OL_B_Gen
+Γ `b e ⇒ ∀{a}. σ
+0
+0
+The induction hypothesis gives us Γ `gen
+sb e ⇒ σ where σ ≤b σ. We know
+0
+0
+σ ≤b ∀{a}. σ. In other words, if σ = ∀{b}. υ1 and σ = ∀{c}. υ2 , we have
+some τ such that υ1 [τ /b] = υ2 . By the definition of ≤b we can use these
+same τ to show that σ 0 ≤b ∀{a, c}. υ2 .
+Case B_Sub
+Γ `b e ⇒ σ1
+σ 1 ≤b σ 2
+OL_B_Sub
+Γ `b e ⇒ σ2
+0
+0
+The induction hypothesis gives us Γ `gen
+sb e ⇒ σ where σ ≤b σ1 . By transitivity of ≤b , we are done.
+Case B_DAbs
+Γ, x :υ1 `b e ⇐ υ2
+OL_B_DAbs
+Γ `b λx . e ⇐ υ1 → υ2
+
+By induction, we have that Γ, x :υ1 `∗sb e ⇐ υ2 . Therefore by SB_DAbs, we
+can conclude Γ `∗sb λx . e ⇐ υ1 → υ2 .
+Case B_DLet
+Γ `b e1 ⇒ σ1
+Γ, x :σ1 `b e2 ⇐ υ
+OL_B_DLet
+Γ `b let x = e1 in e2 ⇐ υ
+By induction we have Γ, x :σ1 `∗sb e2 ⇐ υ. Also by induction, there is some
+0
+σ 0 ≤b σ1 , such that Γ `gen
+sb e ⇒ σ . By context generalization, we know that
+0 ∗
+Γ, x :σ1 `sb e2 ⇐ υ. So we can use SB_DLet to conclude.
+Case B_Skol
+Γ, a `b e ⇐ υ
+a 6∈ ftv (Γ )
+OL_B_Skol
+Γ `b e ⇐ ∀a. υ
+By induction, we have Γ, a `∗sb e ⇐ υ. We can conclude using SB_Skol.
+(Actually, first inverting and then potentially applying SB_Skol multiple
+times).
+Case B_Infer
+Γ `b e ⇒ υ1
+υ1 ≤ol υ2
+OL_B_Infer
+Γ `b e ⇐ υ2
+
+74
+
+Richard A. Eisenberg, Stephanie Weirich, and Hamidhasan G. Ahmed
+0
+By induction, there is some σ 0 ≤b υ1 , such that Γ `gen
+sb e ⇒ σ . By inversion
+gen
+∗
+0
+0
+of `sb we know that σ is of the form ∀{a}. υ and that Γ `sb e ⇒ υ 0 , where
+a do not appear in e and Γ .
+By inversion of ≤b , we know that υ 0 [τ /a] ≤b υ1 . By substitution, we know
+that Γ `∗sb e ⇒ υ 0 [τ /a].
+By transitivity (Lemma 49) we know that υ 0 [τ /a] ≤ol υ2 . So we can conclude
+using SB_Infer.
+
+H.6
+
+Comparison with Dunfield / Krishnaswami
+
+The presence of the non-deep-skolemization System B, makes it easy for us
+to compare our type system with the system designed by Dunfield and Krishnaswami. (We refer to this system as DK in the following.) In particular, we can
+show that our system subsumes the DK system.
+Suppose Γ `DK υ1 ⩽ υ2 is the subtyping relation from the DK paper, Figure
+1.
+Lemma 57 (Higher-rank subsumption contains DK subtyping). If
+Γ `DK υ1 ⩽ υ2 then υ1 ≤ol υ2 .
+Proof. But induction on the DK subtyping judgement.
+Case Decl⩽Var Immediate from DSK_Refl.
+Case Decl⩽Unit Immediate from DSK_Refl.
+Case Decl⩽→ Directly via induction and DSK_Fun.
+Case Decl⩽ ∀L By induction and DSK_Inst.
+Case Decl⩽ ∀R By induction and DSK_Inst.
+The DK system includes an application judgement, written Γ `DK υ1 ◦ e ⇒
+⇒ υ2 , which means "applying a function of type υ1 to e synthesizes type υ2 ".
+Our declarative system does not need this judgement because we allow implicit instantiation for specified polytypes. In our system, the rule B_Sub allows
+instantiation at any point in the judgement. However, in the DK system, instantiation is restricted to be immediately before an application or when synthesis
+mode and checking mode meet (via subtyping). This is what our algorithm actually does, but because we have the instantiation relation, our declarative system
+need not make this constraint.
+Lemma 58. If Γ `DK υ1 ◦ e ⇒⇒ υ2 then there exists some υ10 such that υ1 ≤b
+υ10 → υ2 and Γ `DK e ⇐ υ10 .
+Proof. Proof is by induction on the judgement. It requires an observation about
+our instantiation judgement that if υ1 ≤b υ10 → υ2 and υ1 is ∀b. ρ, then we must
+have instantiated all of the b in the judgment. In otherwords, that ρ[τ /b] =
+υ10 → υ2 .
+Now let Γ `DK e ⇒ υ, Γ `DK e ⇐ υ be the judgements shown in Figure 4
+of their paper. We can also argue that System B can typecheck the same terms.
+
+Visible Type Application (Extended version)
+
+75
+
+Lemma 59.
+1. If Γ `DK e ⇐ υ then Γ `b e ⇐ υ.
+2. If Γ `DK e ⇒ υ then Γ `b e ⇒ υ.
+Proof. Proof is by induction on derivations. Most cases have direct analogues in
+System B. Note that technically we replace their unit type with int. They view
+the checking rule for the unit value as primitive and add a synthesis rule for
+convenience. Our system does not have a checking rule for constants, but can
+derive one from the synthesis rule and B_Sub.
+The only other case that requires additional reasoning is the convenience
+rule for inferring the types of functions. We need to use lemma 53 to convert a
+checking judgement for monotypes into a synthesis judgement.
+
+

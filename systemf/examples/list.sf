@@ -1,0 +1,26 @@
+-- List data type and operations
+
+data List a = Nil | Cons a (List a)
+
+-- length : ∀a. List a -> Int
+-- Returns the length of a list
+length :: ∀a. List a → Int = λxs →
+  case xs of
+    Nil → 0
+    Cons y ys → 1 + length ys
+
+-- map : ∀a. ∀b. (a -> b) -> List a -> List b
+-- Applies a function to every element of a list
+map :: ∀a. ∀b. (a → b) → List a → List b =
+  λf xs →
+    case xs of
+      Nil → Nil
+      Cons y ys → Cons (f y) (map f ys)
+
+-- append : ∀a. List a -> List a -> List a
+-- Concatenates two lists
+append :: ∀a. List a → List a → List a =
+  λxs ys →
+    case xs of
+      Nil → ys
+      Cons z zs → Cons z (append zs ys)

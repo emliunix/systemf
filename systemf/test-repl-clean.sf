@@ -1,0 +1,83 @@
+test_int :: Int = 42
+test_true :: Bool = True
+test_false :: Bool = False
+test_wildcard :: _ = 123
+test_add :: Int = int_plus 1 2
+test_mult :: Int = int_multiply 4 5
+test_sub :: Int = int_minus 10 3
+id_int :: Int → Int = λx → x
+test_id_int :: Int = id_int 42
+const_int :: Int → Int → Int = λx y → x
+test_const :: Int = const_int 5 10
+id_auto :: _ = λx → x
+test_id_auto :: Int = id_auto 100
+poly_id :: ∀a. a → a = λx → x
+test_poly_id_int :: Int = poly_id @Int 42
+test_poly_id_bool :: Bool = poly_id @Bool True
+poly_const :: ∀a b. a → b → a = λx y → x
+test_poly_const :: Int = poly_const @Int @Bool 42 True
+just_val :: Maybe Int = Just 42
+nothing_val :: Maybe Int = Nothing
+empty_list :: List Int = Nil
+single_item :: List Int = Cons 42 Nil
+two_items :: List Int = 1 : 2 : Nil
+left_val :: Either Int Bool = Left 42
+right_val :: Either Int Bool = Right True
+from_maybe :: Int → Maybe Int → Int
+from_maybe = λdefault m →
+  case m of
+    Nothing → default
+    Just x → x
+
+test_from_just :: Int = from_maybe 0 (Just 42)
+test_from_nothing :: Int = from_maybe 0 Nothing
+length_list :: List Int → Int
+length_list = λxs →
+  case xs of
+    Nil → 0
+    Cons y ys → int_plus 1 (length_list ys)
+
+test_length_empty :: Int = length_list Nil
+test_length_two :: Int = length_list (1 : 2 : Nil)
+is_empty :: List Int → Bool
+is_empty = λxs →
+  case xs of
+    Nil → True
+    Cons _ _ → False
+
+test_is_empty_true :: Bool = is_empty Nil
+test_is_empty_false :: Bool = is_empty (Cons 1 Nil)
+map_list :: ∀a b. (a → b) → List a → List b
+map_list = λf xs →
+  case xs of
+    Nil → Nil
+    Cons y ys → Cons (f y) (map_list f ys)
+
+test_map_inc :: List Int = map_list (λx → int_plus x 1) (1 : 2 : Nil)
+factorial :: Int → Int
+factorial = λn →
+  case int_eq n 0 of
+    True → 1
+    False → int_multiply n (factorial (int_minus n 1))
+
+test_fact_0 :: Int = factorial 0
+test_fact_5 :: Int = factorial 5
+fib :: Int → Int
+fib = λn →
+  case int_lt n 2 of
+    True → n
+    False → int_plus (fib (int_minus n 1)) (fib (int_minus n 2))
+
+test_fib_0 :: Int = fib 0
+test_fib_5 :: Int = fib 5
+compose :: ∀a b c. (b → c) → (a → b) → a → c
+compose = λf g x → f (g x)
+
+add1 :: Int → Int = λx → int_plus x 1
+mul2 :: Int → Int = λx → int_multiply x 2
+test_compose :: Int = compose @Int @Int @Int mul2 add1 5
+test_and :: Bool = bool_and True True
+test_or :: Bool = bool_or False True
+test_not :: Bool = bool_not True
+test_concat :: String = string_concat "Hello " "World"
+test_str_len :: Int = string_length "Hello"

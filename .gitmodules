@@ -1,0 +1,3 @@
+[submodule "bub"]
+	path = bub
+	url = https://github.com/bubbuild/bub.git

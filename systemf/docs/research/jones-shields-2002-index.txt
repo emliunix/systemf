@@ -1,0 +1,200 @@
+# Jones & Shields 2002 - Lexically-scoped Type Variables - Paper Index
+
+**Paper**: "Lexically-scoped type variables"  
+**Authors**: Simon Peyton Jones, Mark Shields  
+**Date**: April 1, 2004 (submitted to ICFP'04)  
+**Source**: `/systemf/docs/research/jones-shields-2002-scoped-type-variables.txt`
+
+---
+
+## What is this?
+
+A quick-reference index mapping section headers and key topics to line numbers in `jones-shields-2002-scoped-type-variables.txt`. This paper explores two approaches to lexically-scoped type variables: the "type-lambda" approach (SML) and the "type-sharing" approach (GHC).
+
+## How to use it
+
+```bash
+# Jump to a specific section
+sed -n '48,104p' jones-shields-2002-scoped-type-variables.txt     # Section 1
+sed -n '190,529p' jones-shields-2002-scoped-type-variables.txt    # Section 3
+
+# Search for specific concepts
+grep -n "pattern type signature" jones-shields-2002-scoped-type-variables.txt
+grep -n "implicit quantification" jones-shields-2002-scoped-type-variables.txt
+```
+
+---
+
+## Main Sections
+
+| Section | Line | Description |
+|---------|------|-------------|
+| Abstract | 7-47 | Overview of scoped type variables problem |
+| **1 Motivation** | 48-104 | The `prefix`/`xcons` example problem |
+| **2 Why type annotations are important** | 105-189 | Polymorphic recursion, higher-rank types |
+| **3 The type-lambda approach: SML** | 190-529 | SML-style explicit type abstraction |
+| **4 The type-sharing approach: GHC** | 530-952 | GHC-style implicit scoping |
+| 4.1 Pattern type signatures | 535-600 | Patterns bring type vars into scope |
+| 4.1.1 Pattern type signatures | 535-600 | Detailed rules |
+| 4.1.2 Expression type signatures | 601-650 | Type annotations on expressions |
+| 4.1.3 Function bindings | 651-700 | Type signatures on function bindings |
+| 4.1.4 Multiple type variables | 701-750 | Handling multiple scoped variables |
+| 4.1.5 Explicit forall | 751-800 | Syntax for explicit quantification |
+| 4.2 Static semantics | 801-900 | Type system formalization |
+| 4.2.1 Internal vs external types | 840-870 | υ (external) vs τ (internal) |
+| **5 Discussion** | 953-1162 | Design space, implications, variants |
+| **6 Related work** | (within Discussion) | SML, OCaml, other implementations |
+| **7 References** | 1163-1173 | Bibliography |
+
+---
+
+## Key Concepts by Location
+
+### Core Examples
+
+| Concept | Line | Description |
+|---------|------|-------------|
+| **prefix/xcons example** | 49-56 | Motivating example: cannot annotate `xcons` |
+| **Implicit quantification** | 58-65 | `a` implicitly becomes `forall a` |
+| **Free type variable problem** | 68-75 | `a` is free in `xcons`, not bound |
+
+### Type-Lambda Approach (SML)
+
+| Concept | Line | Description |
+|---------|------|-------------|
+| **Big lambda (Λ)** | 200-250 | Explicit type abstraction |
+| **Explicit type application** | 250-300 | `@τ` syntax for instantiation |
+| **Type generalization** | 300-350 | When to generalize |
+| **Value restriction** | 350-400 | SML's value restriction |
+| **Polymorphic recursion** | 400-450 | `fix` and polymorphic recursion |
+
+### Type-Sharing Approach (GHC)
+
+| Concept | Line | Description |
+|---------|------|-------------|
+| **Pattern type signatures** | 535-600 | `x::a` brings `a` into scope |
+| **Implicit binding** | 548-580 | Type vars implicitly bound |
+| **Explicit binding** | 580-600 | Type vars explicitly bound |
+| **Expression signatures** | 601-650 | `(e :: τ)` with scoped vars |
+| **Function bindings** | 651-700 | `f :: a -> a` with scoped `a` |
+| **Multiple signatures** | 701-750 | Multiple pattern signatures |
+| **Explicit forall** | 751-800 | `forall a. a -> a` syntax |
+| **External vs internal types** | 840-870 | υ (external) vs τ (internal) |
+| **Environment Φ** | 868-900 | Maps scoped vars to monotypes |
+
+### Typing Judgments
+
+| Judgment | Line | Description |
+|----------|------|-------------|
+| **Γ; Φ ⊢ e : τ** | 855-865 | Basic typing judgment |
+| **Γ (term context)** | 861-863 | Term variables → internal types |
+| **Φ (type context)** | 868-870 | Scoped vars → monotypes |
+
+### Design Choices (Section 5)
+
+| Topic | Line | Description |
+|-------|------|-------------|
+| **Implicit vs explicit binding** | 960-1000 | When is a type var bound? |
+| **Type or type variable** | 864-870 | Scoped var = type or arbitrary type? |
+| **Polymorphic types allowed?** | 865-870 | Can scoped var stand for polymorphic type? |
+| **SML comparison** | 1000-1050 | Contrasting approaches |
+| **OCaml** | 1050-1100 | OCaml's approach |
+| **GHC implementation** | 1100-1160 | Implementation notes |
+
+---
+
+## Code Examples
+
+```haskell
+-- Motivating example (lines 49-56)
+prefix :: a -> [[a]] -> [[a]]
+prefix x yss = let
+  -- xcons :: [a] -> [a]  -- CANNOT WRITE THIS
+  xcons ys = x : ys
+  in map xcons yss
+
+-- With scoped type variables (GHC approach)
+-- Pattern signature brings 'a' into scope (lines 535-550)
+prefix :: a -> [[a]] -> [[a]]
+prefix (x :: a) yss = let
+  xcons :: [a] -> [a]  -- Now 'a' is in scope!
+  xcons ys = x : ys
+  in map xcons yss
+
+-- SML-style type lambda (lines 200-250)
+-- Λa. λ(x:a). let xcons = ... in ...
+```
+
+---
+
+## Key Design Dimensions
+
+### 1. Type-Lambda Approach (SML)
+- **Explicit** type abstraction (Λa.e)
+- **Explicit** type application (e @τ)
+- Value restriction limits polymorphism
+- Clean denotational semantics
+- Verbose syntax
+
+### 2. Type-Sharing Approach (GHC)
+- **Implicit** type scoping via signatures
+- No explicit type application needed
+- Pattern signatures bring vars into scope
+- Closer to programmer intuition
+- Less verbose
+
+### Key Questions (Section 5)
+1. **Implicit or explicit binding?** - When is a type variable bound?
+2. **Type or type variable?** - Can scoped var represent polymorphic type?
+3. **Monomorphic instantiation** - Scoped vars represent monotypes only
+
+---
+
+## Comparison with Other Papers
+
+| Aspect | Jones & Shields 2002 | Eisenberg 2016 | Putting 2007 |
+|--------|---------------------|----------------|--------------|
+| Focus | Scoped type variables | Visible type application | Higher-rank inference |
+| Key syntax | `(x::a)` patterns | `id @Int` | Bidirectional checking |
+| Main systems | SML (type-lambda), GHC (type-sharing) | HM, HMV, V, SB, B | DM, Odersky-Läufer, Bidirectional |
+| Innovation | Formalizes GHC approach | Specified vs generalized vars | Deep skolemization |
+| Relationship | Foundation for scoped vars | Builds on scoped vars | Higher-rank extension |
+
+---
+
+## Usage Examples
+
+```bash
+# Read the motivation section
+sed -n '48,104p' jones-shields-2002-scoped-type-variables.txt
+
+# Find pattern type signature rules
+sed -n '535,600p' jones-shields-2002-scoped-type-variables.txt
+
+# Search for external vs internal types
+grep -n "external\|internal" jones-shields-2002-scoped-type-variables.txt
+
+# Find the type-sharing approach description
+sed -n '530,600p' jones-shields-2002-scoped-type-variables.txt
+
+# Look at typing judgment
+sed -n '855,865p' jones-shields-2002-scoped-type-variables.txt
+```
+
+---
+
+## Important Notes
+
+- **External types** (υ): Types in source code with scoped vars
+- **Internal types** (τ): Types in judgments (monomorphic)
+- **Environment Φ**: Maps scoped type vars to monotypes they represent
+- **Key insight**: Scoped vars act as "type sharing" - they denote the same type throughout their scope
+- **Connection to Eisenberg 2016**: This paper's "specified type variables" are similar to scoped vars
+
+---
+
+## File Reference
+
+- **PDF**: `Jones and Shields - Lexically-scoped type variables.pdf`
+- **TXT**: `jones-shields-2002-scoped-type-variables.txt`
+- **Index**: `jones-shields-2002-index.txt` (this file)

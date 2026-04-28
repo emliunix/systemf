@@ -1,0 +1,28 @@
+[project]
+name = "systemf_workspace"
+
+dependencies = [
+    "bub_sf",
+    "systemf",
+    "bub",
+]
+
+[tool.uv.workspace]
+members = [
+    "systemf",
+    "bub_sf",
+    "upstream/bub_backup",
+]
+
+[tool.uv.sources]
+systemf = { workspace = true }
+bub_sf = { workspace = true }
+bub = { workspace = true }
+
+[tool.pyright]
+extraPaths = [
+  "bub_sf/src/",
+  "systemf/src/",
+  "bub/src/",
+]
+stubPath = "systemf/typings/"

@@ -1,0 +1,40 @@
+-- Basic LLM function examples using prim_op syntax
+-- These demonstrate the core syntax for LLM integration in System F
+
+-- ============================================================================
+-- Example 1: Single Parameter LLM Function
+-- ============================================================================
+-- Pragma with model configuration (optional)
+{-# LLM model=gpt-4 temperature=0.7 #-}
+
+-- Function-level doc (-- | style)
+-- | Translate English text to French
+
+-- Declaration with parameter doc (-- ^ style)
+prim_op translate :: String
+  -- ^ The English text to translate
+  -> String
+  -- Result is the French translation
+
+-- ============================================================================
+-- Example 2: LLM Function with Minimal Pragma
+-- ============================================================================
+-- Using default model configuration
+{-# LLM #-}
+-- | Generate a creative story summary
+prim_op summarize :: String
+  -- ^ The story text to summarize
+  -> String
+  -- Result is a brief summary
+
+-- ============================================================================
+-- Example 3: LLM Function with Result Documentation
+-- ============================================================================
+{-# LLM model=claude temperature=0.5 #-}
+-- | Answer a question based on context
+prim_op answer :: String
+  -- ^ Background context for the question
+  -> String
+  -- ^ The question to answer
+  -> String
+  -- The answer based on the provided context

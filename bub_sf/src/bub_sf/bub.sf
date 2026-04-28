@@ -1,0 +1,9 @@
+
+prim_op test_prim :: String -> Int -> Int
+
+
+{-# LLM #-}
+-- | expand the input message
+prim_op :: String -- ^ the message
+  -> String
+
