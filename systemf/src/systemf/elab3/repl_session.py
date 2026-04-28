@@ -61,7 +61,6 @@ class REPLSession(EvalCtx, REPLSessionProto):
 
 
     @property
-    @overload
     def state(self) -> dict[str, Any]:
         return self._state
 

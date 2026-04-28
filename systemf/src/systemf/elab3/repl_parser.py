@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Callable, TypeVar
 
 from systemf.elab3.reader_env import ImportSpec
+from systemf.elab3.types.ast import ImportDecl
 
 
 # =============================================================================
@@ -43,7 +44,7 @@ class Info:
 @dataclass(frozen=True)
 class Import:
     """:import [qualified] <module> [as <alias>]"""
-    spec: ImportSpec
+    imp: ImportDecl
 
 
 @dataclass(frozen=True)
@@ -75,7 +76,13 @@ def _parse_import(raw: str) -> Import:
     try:
         tokens = list(lex(f"import {raw}", "<repl import>"))
         decl = (import_decl_parser() << eof).parse(tokens)
-        return Import(ImportSpec(module_name=decl.module, alias=decl.alias, is_qual=decl.qualified))
+        return Import(ImportDecl(
+            module=decl.module,
+            alias=decl.alias,
+            qualified=decl.qualified,
+            import_items=decl.items if not decl.hiding else None,
+            hiding_items=decl.items if decl.hiding else None,
+        ))
     except Exception:
         raise REPLParseError(f"invalid import: {raw}")
 
