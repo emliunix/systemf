@@ -10,13 +10,14 @@ requires-python = ">=3.14, <4.0"
 dependencies = [
     "systemf",
     "bub",
+    "loguru",
 ]
 
 [project.scripts]
 bub-sf = "bub_sf:main"
 
 [project.entry-points.bub]
-sf = "bub_sf.sf_hook:SFHookImpl"
+sf = "bub_sf.hook:SFHookImpl"
 
 [build-system]
 requires = ["uv_build>=0.11.2,<0.12.0"]

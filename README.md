@@ -9,6 +9,17 @@ The initial goal of the project is to organize LLM thinking programmatically.
 So we also leverage the tape of **bub** and expose it as primitives to control the context,
 by both programs and LLM.
 
+## Example: simple LLM call as a function
+
+```haskell
+{-# LLM #-}
+-- | expand the input message
+prim_op test_llm :: String -- ^ the message
+  -> String
+```
+
+[!example](./assets/example.png)
+
 ## System F
 
 System F is a typed lambda calculus with polymorphism. The foundation of Haskell,
