@@ -1,9 +1,0 @@
--- Identity function
--- The polymorphic identity function has type forall a. a -> a
-id :: ∀a. a → a = λx → x
-
--- Usage: instantiate with Int
-int_id :: Int → Int = id @Int
-
--- Usage: instantiate with Bool
-bool_id :: Bool → Bool = id @Bool
