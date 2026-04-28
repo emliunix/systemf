@@ -17,3 +17,12 @@ class Module:
     exports: list[Name]
     _tythings_map: dict[Name, TyThing]
     source_path: str | None = None
+
+    @staticmethod
+    def create(name, tythings, bindings) -> Module:
+        exports = [n for n, _ in tythings]
+        tythings_map = {n: t for n, t in tythings}
+        return Module(name=name, tythings=tythings, bindings=bindings, exports=exports, _tythings_map=tythings_map)
+
+    def lookup_tything(self, name: Name) -> TyThing | None:
+        return self._tythings_map.get(name)

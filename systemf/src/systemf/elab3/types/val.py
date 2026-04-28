@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,6 +23,11 @@ class VLit(Val):
 @dataclass
 class VPrim(Val):
     val: Any
+
+
+@dataclass
+class VAsync(Val):
+    val: Coroutine[None, None, Val]
 
 
 @dataclass

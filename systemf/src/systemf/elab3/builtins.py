@@ -2,7 +2,7 @@
 # and we build a dict for NameCache to lookup
 
 from .types import Name
-from .types.val import VData
+from .types.val import VData, Val
 
 
 BUILTIN_UNIT = Name("builtins", "Unit", 1)
@@ -106,6 +106,11 @@ BUILTIN_BIN_OPS = {
 
 TRUE_VAL = VData(0, [])
 FALSE_VAL = VData(1, [])
+
+def CONS_VAL(head: Val, tail: VData) -> VData:
+    return VData(1, [head, tail])
+
+NIL_VAL = VData(0, [])
 
 UNIT_VAL = VData(0, [])
 

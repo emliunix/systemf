@@ -36,14 +36,16 @@ class FakeCtx(TcCtx):
         bool_tycon = ATyCon(
             name=self.bool_name,
             tyvars=[],
+            metas=None,
             constructors=[
-                ACon(name=self.true_name, tag=1, arity=0, field_types=[], parent=self.bool_name),
-                ACon(name=self.false_name, tag=2, arity=0, field_types=[], parent=self.bool_name),
+                ACon(name=self.true_name, tag=1, arity=0, field_types=[], parent=self.bool_name, metas=None),
+                ACon(name=self.false_name, tag=2, arity=0, field_types=[], parent=self.bool_name, metas=None),
             ],
         )
         pair_tycon = ATyCon(
             name=self.pair_name,
             tyvars=[],
+            metas=None,
             constructors=[
                 ACon(
                     name=Name("Test", "MkPair", 5),
@@ -51,20 +53,23 @@ class FakeCtx(TcCtx):
                     arity=2,
                     field_types=[int_ty, int_ty],
                     parent=self.pair_name,
+                    metas=None,
                 ),
             ],
         )
         tree_tycon = ATyCon(
             name=self.tree_name,
             tyvars=[],
+            metas=None,
             constructors=[
-                ACon(name=Name("Test", "Leaf", 6), tag=1, arity=0, field_types=[], parent=self.tree_name),
+                ACon(name=Name("Test", "Leaf", 6), tag=1, arity=0, field_types=[], parent=self.tree_name, metas=None),
                 ACon(
                     name=Name("Test", "Node", 7),
                     tag=2,
                     arity=3,
                     field_types=[int_ty, TyConApp(self.tree_name, []), TyConApp(self.tree_name, [])],
                     parent=self.tree_name,
+                    metas=None,
                 ),
             ],
         )

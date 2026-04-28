@@ -4,27 +4,28 @@ REPL - orchestration and state management.
 The main context shared across REPL sessions. REPL session is the main interface for REPL.
 """
 
-from pathlib import Path
-from typing import Callable, cast, override
+import functools
 
-from systemf.surface.parser import parse_expression, parse_program, ParseError
-from systemf.surface.types import SurfaceTermDeclaration
+from dataclasses import dataclass
+from pathlib import Path
+from typing import cast, override
+
+from systemf.elab3.types.synths import PrimOpsSynth, SynthChain, SynthRouter
 from systemf.utils.uniq import Uniq
 
 from . import pipeline
-from .pipeline import Code
 from . import builtins as bi
 from . import builtins_rts as rts
 from .name_gen import NameCacheImpl
 from .reader_env import ReaderEnv
 from .repl_session import REPLSession
 from .types import Module, REPLContext, Name, NameCache
-from .types.protocols import Ext, PrimOpsSynth, REPLSessionProto, Synthesizer
+from .types.protocols import Ext, REPLSessionProto, Synthesizer
 from .types.tything import AnId
 from .types.val import VData, VPartial, Val
 
 
-class REPL(REPLContext):
+class REPL(REPLContext, Synthesizer):
     """Owns shared state, creates sessions, orchestrates module loading.
 
     Contains NameCache which wraps the Uniq counter for generating unique IDs.
@@ -52,14 +53,21 @@ class REPL(REPLContext):
         mod_synths = {
             "builtins": cast(Synthesizer, PrimOpsSynth(_builtins_primops())),
         }
+        nonmod_synths = []
         paths = search_paths and search_paths[:] or []
         paths.extend([".", str(Path(__file__).parent.parent)])
         for ext in self.exts:
-            if (synths := ext.synthesizer()) is not None:
-                mod_synths.update(synths)
+            match ext.synthesizer():
+                case dict() as synths:
+                    mod_synths.update(synths)
+                case Synthesizer() as synth:
+                    nonmod_synths.append(synth)
             if len(ext_paths := ext.search_paths()) > 0:
                 paths.extend(ext_paths)
-        self.ops_synther = SyntRouter(mod_synths, LLMSynth())
+        
+        # first in ext takes precedence
+        nonmod_synth = functools.reduce(lambda a, curr: SynthChain(curr, a), reversed(nonmod_synths), None)
+        self.ops_synther = SynthRouter(mod_synths, nonmod_synth)
         self.search_paths = paths
 
     # --- REPLContext implementation -----------------------------------------
@@ -112,7 +120,7 @@ class REPL(REPLContext):
         """Create a new REPL session with given state."""
         return REPLSession(
             self,
-            reader_env=ReaderEnv.empty(),
+            repl_rdr_env=ReaderEnv.empty(),
             tythings=[],
             mod_insts={},
         )
@@ -157,29 +165,3 @@ def _build_import_chain(loads: dict[str, str | None], start: str) -> str:
         chain.append(parent)
         parent = loads.get(parent)
     return "->".join(list(reversed(chain)))
-
-
-class SyntRouter(Synthesizer):
-    mod_synths: dict[str, Synthesizer]
-    next_synth: Synthesizer | None
-
-    def __init__(self, mod_synths: dict[str, Synthesizer], next_synth: Synthesizer | None = None):
-        self.mod_synths = mod_synths
-        self.next_synth = next_synth
-
-    def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None:
-        if (synth := self.mod_synths.get(name.mod)) is not None:
-            primop = synth.get_primop(name, thing, session)
-            if primop is not None:
-                return primop
-        if self.next_synth is not None:
-            return self.next_synth.get_primop(name, thing, session)
-        return None
-
-
-class LLMSynth(Synthesizer):
-    # move to 
-    def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None:
-        # TODO: implement LLM-based synthesizer
-        # should be moved to bub_sf extension
-        return None

@@ -28,7 +28,7 @@ def test_anid_creation():
 
 def test_atycon_creation():
     name = mk_name("Bool", "Builtin", 2)
-    tycon = ATyCon(name=name, tyvars=[], constructors=[])
+    tycon = ATyCon(name=name, tyvars=[], constructors=[], metas=None)
     assert tycon.name == name
     assert tycon.tyvars == []
     assert tycon.constructors == []
@@ -43,6 +43,7 @@ def test_acon_creation():
         arity=2,
         field_types=[],
         parent=parent,
+        metas=None,
     )
     assert acon.parent == parent
     assert acon.tag == 0

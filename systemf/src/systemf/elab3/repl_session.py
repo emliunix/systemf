@@ -1,50 +1,69 @@
 
-from pathlib import Path
-from typing import cast, override
+from typing import Any, Callable, Protocol, cast, overload, override
 
 from systemf.elab3.core_extra import CoreBuilderExtra
 from systemf.elab3.types.ast import ImportDecl
-from systemf.elab3.types.protocols import NameGenerator, REPLSessionProto
+from systemf.elab3.types.protocols import NameGenerator, REPLSessionProto, Synthesizer
 from systemf.surface.parser import parse_expression, parse_program, ParseError
 from systemf.surface.types import SurfaceTermDeclaration
-from systemf.utils.uniq import Uniq
 
 from . import pipeline
 from .pipeline import Code
 from . import builtins as bi
-from . import builtins_rts as rts
-from .name_gen import NameCacheImpl, NameGeneratorImpl, check_dups
-from .reader_env import ImportSpec, ReaderEnv, ImportRdrElt, UnqualName, QualName
+from .name_gen import NameGeneratorImpl, check_dups
+from .reader_env import ImportSpec, ReaderEnv, ImportRdrElt, QualName
 from .eval import Evaluator, EvalCtx
-from .types import Module, TyThing, REPLContext, Name, NameCache
-from .types.ty import Id, Ty, TyConApp, TyFun, subst_ty
-from .types.tything import ACon, ATyCon, AnId, tything_name
-from .types.val import Trap, VClosure, VData, VLit, VPartial, Val
+from .types import Module, TyThing, REPLContext, Name
+from .types.ty import Id, Ty, TyConApp, TyFun
+from .types.tything import ACon, AnId, tything_name
+from .types.val import VData, VPartial, Val
+
+
+class REPLContextExt(REPLContext, Synthesizer, Protocol):
+    pass
 
 
 class REPLSession(EvalCtx, REPLSessionProto):
     """Accumulates imports and bindings. Corresponds to InteractiveContext."""
-    ctx: REPLContext
-    reader_env: ReaderEnv                 # Accumulated imports
-    tythings: list[TyThing]               # Previous definitions
+    ctx: REPLContextExt
+    repl_rdr_env: ReaderEnv               # repl items
+    imports_rdr_env: ReaderEnv            # mod imports
+    reader_env: ReaderEnv                 # cached merged reader_env of the above 2
+    tythings: list[TyThing]               # all definitions
     # keep all evaluated REPL modules and normal modules
     mod_insts: dict[str, dict[Name, Val]] # Cache for evaluated module instances
 
     _tythings_map: dict[Name, TyThing]
     _core_extra: CoreBuilderExtra
+    _state: dict[str, Any]
+    _imports: list[str]
 
     _evaling: list[str]                   # Modules currently being evaluated (for cycle detection)
     _evaluator: Evaluator
 
-    def __init__(self, ctx: REPLContext, reader_env: ReaderEnv, tythings: list[TyThing], mod_insts: dict[str, dict[Name, Val]]):
+    def __init__(self, ctx: REPLContextExt,
+                repl_rdr_env: ReaderEnv,
+                tythings: list[TyThing],
+                mod_insts: dict[str, dict[Name, Val]],
+                ):
         self.ctx = ctx
-        self.reader_env = reader_env
+        self.repl_rdr_env = repl_rdr_env
+        # imports are empty initially
+        self.imports_rdr_env = ReaderEnv.empty()
+        self.reader_env = self.repl_rdr_env
         self.tythings = tythings
         self.mod_insts = mod_insts
         self._tythings_map = {tything_name(thing): thing for thing in tythings}
         self._core_extra = CoreBuilderExtra(self)
+        self._state = {}
         self._evaluator = Evaluator(self)
         self._evaling = []
+
+
+    @property
+    @overload
+    def state(self) -> dict[str, Any]:
+        return self._state
 
     def fork(self) -> REPLSession:
         """
@@ -53,12 +72,12 @@ class REPLSession(EvalCtx, REPLSessionProto):
         """
         return REPLSession(
             ctx=self.ctx,
-            reader_env=self.reader_env,
-            tythings=self.tythings[:], # Copy tythings
-            mod_insts=self.mod_insts.copy() # Copy module instances
+            repl_rdr_env=ReaderEnv.empty(),
+            tythings=self.tythings[:],
+            mod_insts=self.mod_insts.copy(),
         )
 
-    def cmd_import(self, decl: ImportDecl) -> None:
+    def add_import(self, decl: ImportDecl) -> None:
         """Handle an import command by loading the module and updating state."""
         spec = ImportSpec.from_decl(decl)
         mod = self.ctx.load(spec.module_name)
@@ -66,9 +85,10 @@ class REPLSession(EvalCtx, REPLSessionProto):
             ImportRdrElt.create(name, spec)
             for name, _ in mod.tythings
         ])
-        self.reader_env = self.reader_env.merge(new_rdr_env)
+        self.imports_rdr_env = self.imports_rdr_env.merge(new_rdr_env)
+        self._update_rdr_env()
 
-    def cmd_add_args(self, args: list[tuple[str, Val, Ty]]) -> None:
+    def add_args(self, args: list[tuple[str, Val, Ty]]) -> None:
         """Add arguments module in the REPL session."""
         arg_mod = f"Arg{self.ctx.next_replmod_id()}"
         check_dups((n for n, _, _ in args))
@@ -82,7 +102,7 @@ class REPLSession(EvalCtx, REPLSessionProto):
         self.extend_tythings_rdr(tythings)
         self.mod_insts[arg_mod] = mod_inst
 
-    def cmd_add_return(self, ref: list[Val | None], ty: Ty) -> None:
+    def add_return(self, ref: list[Val | None], ty: Ty) -> None:
         """Add a return value setter to the REPL session."""
         ret_mod = f"Ret{self.ctx.next_replmod_id()}"
         fun_ty = TyFun(ty, TyConApp(name=bi.BUILTIN_UNIT, args=[]))
@@ -97,7 +117,7 @@ class REPLSession(EvalCtx, REPLSessionProto):
             fun_name: VPartial.create(fun_name.surface, 1, _fun)
         }
 
-    def eval(self, input: str) -> tuple[Val, Ty] | None:
+    async def eval(self, input: str) -> tuple[Val, Ty] | None:
         """
         Evaluate a REPL expression by wrapping it in a synthetic module,
         typechecking, then running ``eval_mod``.
@@ -112,7 +132,7 @@ class REPLSession(EvalCtx, REPLSessionProto):
                                     reader_env=self.reader_env,
                                     type_env=self._tythings_map.copy())
         self.extend_tythings_rdr([thing for _, thing in repl_mod.tythings])
-        mod_inst = self.eval_mod(repl_mod)
+        mod_inst = await self.eval_mod(repl_mod)
         self.mod_insts[mod_name] = mod_inst
 
         if is_expr:
@@ -144,7 +164,7 @@ class REPLSession(EvalCtx, REPLSessionProto):
         raise Exception(f"Name {name} not found in REPL session")
 
     @override
-    def lookup_gbl(self, name: Name) -> Val:
+    async def lookup_gbl(self, name: Name) -> Val:
         """Resolve a global name, loading and evaluating modules on demand."""
         mod_name = name.mod
 
@@ -165,15 +185,15 @@ class REPLSession(EvalCtx, REPLSessionProto):
             mod = self.ctx.load(mod_name)
 
             # 4. Eager whole module processing & return
-            mod_inst = self.eval_mod(mod)
+            mod_inst = await self.eval_mod(mod)
             self.mod_insts[mod.name] = mod_inst
             return mod_inst[name]
         finally:
             _ = self._evaling.pop()
 
-    def eval_mod(self, mod: Module) -> dict[Name, Val]:
-        mod_inst = self.mk_mod_inst(mod)
-        mod_inst = self._evaluator.eval_mod(mod, mod_inst)
+    async def eval_mod(self, mod: Module) -> dict[Name, Val]:
+        mod_inst = mk_mod_inst(mod, self.mk_primop)
+        mod_inst = await self._evaluator.eval_mod(mod, mod_inst)
         return mod_inst
 
     # --- State management ---
@@ -189,27 +209,16 @@ class REPLSession(EvalCtx, REPLSessionProto):
             ImportRdrElt.create(name, ImportSpec(name.mod, None, False))
             for name in names
         ])
-        self.reader_env = self.reader_env.shadow(set(names)).merge(new_rdr)
+        self.repl_rdr_env = self.repl_rdr_env.shadow(set(names)).merge(new_rdr)
+        self._update_rdr_env()
+
+    def _update_rdr_env(self):
+        self.reader_env = self.imports_rdr_env.merge(self.repl_rdr_env)
 
     # --- helpers ---
 
     def name_gen(self, mod_name: str) -> NameGenerator:
         return NameGeneratorImpl(mod_name, self.ctx.uniq)
-
-    def mk_mod_inst(self, mod: Module) -> dict[Name, Val]:
-        mod_inst: dict[Name, Val] = {}
-        for name, thing in mod.tythings:
-            match thing:
-                case ACon(name=con_name, tag=tag, arity=arity):
-                    mod_inst[name] = VPartial.create(
-                        con_name.surface, arity,
-                        # Capture tag by value in the lambda to avoid closure bug
-                        lambda args, tag=tag: VData(tag, args),
-                    )
-                case AnId(name=name, is_prim=True):
-                    mod_inst[name] = self.mk_primop(name, thing)
-                case _: pass
-        return mod_inst
 
     def mk_primop(self, name: Name, thing: AnId) -> Val:
         if (p := self.ctx.get_primop(name, thing, self)) is not None:
@@ -252,3 +261,19 @@ def normalize_input(file_path: str, input: str) -> tuple[bool, Code]:
         return False, code
     except ParseError as prog_err:
         raise expr_err or prog_err
+
+
+def mk_mod_inst(mod: Module, get_primop: Callable[[Name, AnId], Val]) -> dict[Name, Val]:
+    mod_inst: dict[Name, Val] = {}
+    for name, thing in mod.tythings:
+        match thing:
+            case ACon(name=con_name, tag=tag, arity=arity):
+                mod_inst[name] = VPartial.create(
+                    con_name.surface, arity,
+                    # Capture tag by value in the lambda to avoid closure bug
+                    lambda args, tag=tag: VData(tag, args),
+                )
+            case AnId(name=name, is_prim=True):
+                mod_inst[name] = get_primop(name, thing)
+            case _: pass
+    return mod_inst

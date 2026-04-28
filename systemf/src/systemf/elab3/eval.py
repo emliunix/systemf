@@ -23,7 +23,7 @@ from systemf.elab3.types.core import (
 )
 from .types.ty import Id, Name
 from .types.mod import Module
-from .types.val import Val, VLit, VClosure, VPartial, VData, Trap, Env
+from .types.val import VAsync, Val, VLit, VClosure, VPartial, VData, Trap, Env
 
 
 
@@ -96,7 +96,7 @@ class BackpatchNext(Cont):
 class EvalCtx(Protocol):
     """Protocol for the context that resolves module-level names at runtime."""
 
-    def lookup_gbl(self, name: Name) -> Val: ...
+    async def lookup_gbl(self, name: Name) -> Val: ...
     @property
     def core_extra(self) -> CoreBuilderExtra: ...
 
@@ -117,7 +117,7 @@ class Evaluator:
 
     # --- public API ---------------------------------------------------------
 
-    def eval_mod(self, mod: Module, mod_inst: dict[Name, Val]) -> dict[Name, Val]:
+    async def eval_mod(self, mod: Module, mod_inst: dict[Name, Val]) -> dict[Name, Val]:
         """Evaluate topo-sorted bindings and return all bound values.
 
         Each binding is evaluated independently.  For NonRec, the expression
@@ -132,18 +132,18 @@ class Evaluator:
         for binding in mod.bindings:
             match binding:
                 case NonRec(binder, expr):
-                    val = self._eval_expr(expr, init_env)
+                    val = await self._eval_expr(expr, init_env)
                     mod_inst[binder.name] = val
                     init_env = init_env.set(binder.name.unique, val)
                 case Rec([(bndr, _)]):
-                    val = self._eval_expr(CoreLet(binding, CoreVar(bndr)), init_env)
+                    val = await self._eval_expr(CoreLet(binding, CoreVar(bndr)), init_env)
                     mod_inst[bndr.name] = val
                     init_env = init_env.set(bndr.name.unique, val)
                 case Rec():
                     bndrs = [bndr for bndr, _ in binding.bindings]
                     vars = [C.var(bndr) for bndr in bndrs]
                     tup, _ = self.ctx.core_extra.mk_tuple(vars, [b.ty for b in bndrs])
-                    val = self._eval_expr(CoreLet(binding, tup), init_env) # eval once
+                    val = await self._eval_expr(CoreLet(binding, tup), init_env) # eval once
                     # unwrap the tuple
                     for bndr in bndrs[:-1]:
                         v1, val = cast(VData, val).vals
@@ -155,40 +155,40 @@ class Evaluator:
 
     # --- CEK machine --------------------------------------------------------
 
-    def _eval_expr(self, t: CoreTm, env: Env) -> Val:
+    async def _eval_expr(self, t: CoreTm, env: Env) -> Val:
         """Evaluate a CoreTm to a Val using the CEK machine."""
         cur: Config | Val = (t, env, Halt())
         while not isinstance(cur, Val):
             t1, env1, k1 = cur
-            cur = self.step(t1, env1, k1)
+            cur = await self.step(t1, env1, k1)
         return cur
 
-    def step(self, t: CoreTm, env: Env, k: Cont) -> Config | Val:
+    async def step(self, t: CoreTm, env: Env, k: Cont) -> Config | Val:
         match t:
             case CoreLit(value=value):
-                return self.call_continue(VLit(value), k)
+                return await self.call_continue(VLit(value), k)
 
             case CoreVar(id=id):
                 raw = env.get(id.name.unique)
                 if raw is not None:
                     match raw:
                         case Trap(v=inner) if inner is not None:
-                            return self.call_continue(inner, k)
+                            return await self.call_continue(inner, k)
                         case Trap():
                             raise Exception(
                                 "referencing uninitialized letrec trap for " +
                                 f"{id.name.surface!r} (possible non-productive recursion)"
                             )
                         case _:
-                            return self.call_continue(raw, k)
+                            return await self.call_continue(raw, k)
                 else:
-                    return self.call_continue(self.ctx.lookup_gbl(id.name), k)
+                    return await self.call_continue(await self.ctx.lookup_gbl(id.name), k)
 
             case CoreGlobalVar(id=id):
-                return self.step(CoreVar(id), env, k)
+                return await self.step(CoreVar(id), env, k)
 
             case CoreLam(param=param, body=body):
-                return self.call_continue(VClosure(env, param, body), k)
+                return await self.call_continue(VClosure(env, param, body), k)
 
             case CoreApp(fun=fun, arg=arg):
                 return (fun, env, Ar(arg, env, k))
@@ -227,7 +227,7 @@ class Evaluator:
             case _:
                 raise Exception(f"step: unhandled term: {t!r}")
 
-    def call_continue(self, v: Val, k: Cont) -> "Config | Val":
+    async def call_continue(self, v: Val, k: Cont) -> Config | Val:
         match k:
             case Ar(arg=arg, env=env, k=k2):
                 match v:
@@ -244,9 +244,10 @@ class Evaluator:
                     case VPartial(name=name, arity=arity, done=done, finish=finish):
                         new_done = done + [v]
                         if arity == len(new_done):
-                            return self.call_continue(finish(new_done), k2)
+                            # VPartial apply is the only place where VAsync can appear
+                            return await self.call_continue(await unasync(finish(new_done)), k2)
                         else:
-                            return self.call_continue(
+                            return await self.call_continue(
                                 VPartial(name, arity, new_done, finish), k2
                             )
             case LetBind(binder=binder, body=body, env=env, k=k2):
@@ -282,3 +283,11 @@ class Evaluator:
                 return v
             case _:
                 raise Exception(f"invalid continuation: {k!r}")
+
+
+async def unasync(val: Val) -> Val:
+    match val:
+        case VAsync(v):
+            return await v
+        case _:
+            return val

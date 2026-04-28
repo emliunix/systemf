@@ -17,8 +17,8 @@ class MockTyLookup:
     def __init__(self, things: dict[Name, TyThing]) -> None:
         self._things = things
 
-    def lookup(self, name: Name) -> TyThing | None:
-        return self._things.get(name)
+    def lookup(self, name: Name) -> TyThing:
+        return self._things[name]
 
 
 def _mk_pair_tycon() -> ATyCon:
@@ -30,11 +30,13 @@ def _mk_pair_tycon() -> ATyCon:
         arity=2,
         field_types=[a, b],
         parent=BUILTIN_PAIR,
+        metas=None,
     )
     return ATyCon(
         name=BUILTIN_PAIR,
         tyvars=[a, b],
         constructors=[mkpair],
+        metas=None,
     )
 
 

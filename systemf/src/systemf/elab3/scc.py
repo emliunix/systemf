@@ -1,5 +1,5 @@
 """
-SCC components analysis
+SCC components analysis (AI GEN)
 
 Given a list of bindings, each binding potentially uses other bindings.
 Define a graph of bindings, each node is a binding, and the edges are the "uses" relationship.
