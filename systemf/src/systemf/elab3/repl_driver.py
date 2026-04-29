@@ -14,6 +14,7 @@ Commands:
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Iterable, Iterator
+from pathlib import Path
 from typing import Callable
 
 from systemf.elab3.reader_env import ImportSpec, UnqualName
@@ -26,6 +27,7 @@ from systemf.elab3.repl_parser import (
     REPLCommand, parse_lines, REPLParseError,
     CodeInput, Browse, Info, Import, Help, Exit,
 )
+from systemf.utils.location import Location
 
 
 PROMPT = ">> "
@@ -145,7 +147,7 @@ class REPLDriver:
             for elt in results:
                 name = elt.name
                 thing = self.session.lookup(name)
-                yield f"{name}"
+                yield _pp_info_name(name.mod, name.surface, name.loc)
                 for line in pp_tything(thing).strip().split("\n"):
                     yield f"  {line}"
         except Exception as e:
@@ -159,3 +161,22 @@ class REPLDriver:
         yield "  :{ ... :}         Multi-line input"
         yield "  :help             Show this help"
         yield "  :quit, :q, :exit  Exit the REPL"
+
+
+def _pp_info_name(mod: str, surface: str, loc: Location | None) -> str:
+    header = f"{mod}.{surface}"
+    if loc is None:
+        return header
+    return f"{header}  -- defined at {_pp_loc(loc.file, loc.line, loc.column)}"
+
+
+def _pp_loc(file: str | None, line: int, column: int) -> str:
+    if file is None:
+        return f"line {line}:{column}"
+    try:
+        path = Path(file)
+        if path.is_absolute():
+            file = str(path.relative_to(Path.cwd()))
+    except ValueError:
+        pass
+    return f"{file}:{line}:{column}"
