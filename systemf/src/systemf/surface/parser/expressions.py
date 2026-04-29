@@ -57,6 +57,7 @@ from systemf.surface.parser.types import (
     InToken,
     KeywordToken,
     LambdaToken,
+    LeftBracketToken,
     LeftParenToken,
     LeToken,
     LetToken,
@@ -68,12 +69,14 @@ from systemf.surface.parser.types import (
     OperatorToken,
     OrToken,
     PlusToken,
+    RightBracketToken,
     RightParenToken,
     SlashToken,
     StarToken,
     StringToken,
     ThenToken,
     TokenBase,
+    UnitToken,
 )
 from systemf.surface.types import (
     SurfaceAbs,
@@ -83,17 +86,21 @@ from systemf.surface.types import (
     SurfaceCase,
     SurfaceIf,
     SurfaceLet,
+    SurfaceList,
     SurfaceLit,
     SurfaceLitPattern,
+    SurfaceListPattern,
     SurfaceOp,
-    SurfacePattern,
     SurfacePatternBase,
     SurfacePatternCons,
+    SurfacePatternSeq,
     SurfacePatternTuple,
+    SurfaceUnitPattern,
     SurfaceTerm,
     SurfaceTuple,
     SurfaceType,
     SurfaceTypeApp,
+    SurfaceUnit,
     SurfaceVar,
     SurfaceVarPattern,
     SurfaceWildcardPattern,
@@ -267,6 +274,45 @@ def tuple_parser() -> P[SurfaceTerm]:
     return parser
 
 
+def unit_parser() -> P[SurfaceUnit]:
+    """Parse the unit expression syntax: ()."""
+
+    @generate
+    def parser():
+        token = yield match_token(UnitToken)
+        return SurfaceUnit(location=token.location)
+
+    return parser
+
+
+def list_parser() -> P[SurfaceList]:
+    """Parse a list expression: [], [e1], [e1, e2, ..., en]."""
+
+    @generate
+    def parser():
+        open_bracket = yield match_token(LeftBracketToken)
+        loc = open_bracket.location
+
+        close_bracket = yield match_token(RightBracketToken).optional()
+        if close_bracket is not None:
+            return SurfaceList(elements=[], location=loc)
+
+        first = yield expr_parser(AnyIndent())
+        elements = [first]
+
+        while True:
+            close_bracket = yield match_token(RightBracketToken).optional()
+            if close_bracket is not None:
+                break
+            yield match_token(CommaToken)
+            elem = yield expr_parser(AnyIndent())
+            elements.append(elem)
+
+        return SurfaceList(elements=elements, location=loc)
+
+    return parser
+
+
 def paren_parser() -> P[SurfaceTerm]:
     """Parse a parenthesized expression: ( expr ) or tuple: (e1, e2, ..., en).
 
@@ -278,6 +324,10 @@ def paren_parser() -> P[SurfaceTerm]:
 
     @generate
     def parser():
+        unit_result = yield unit_parser().optional()
+        if unit_result is not None:
+            return unit_result
+
         # Try tuple first (it requires a comma)
         tuple_result = yield tuple_parser().optional()
         if tuple_result is not None:
@@ -311,6 +361,11 @@ def atom_base_parser(constraint: ValidIndent | None = None) -> P[SurfaceTerm]:
         paren = yield paren_parser().optional()
         if paren is not None:
             return paren
+
+        # Try list literal
+        list_result = yield list_parser().optional()
+        if list_result is not None:
+            return list_result
 
         # Try literal
         lit = yield literal_parser().optional()
@@ -793,36 +848,38 @@ def pattern_literal_parser() -> P[SurfaceLitPattern]:
 
 
 def pattern_atom_parser() -> P[SurfacePatternBase]:
-    """Parse atomic patterns: identifier, literal, tuple, or grouped pattern.
+    """Parse atomic patterns: unit, list, tuple, grouped, literal, or base.
 
     Used as constructor arguments or standalone patterns.
     Does NOT handle cons operator - that's done at higher level.
 
     Returns:
-        SurfacePattern, SurfacePatternTuple, SurfacePatternCons, or SurfaceLitPattern
+        One atomic surface pattern node
     """
 
     @generate
     def parser():
-        # Try tuple first: (x, y)
-        tuple_result = yield pattern_tuple_parser().optional()
-        if tuple_result is not None:
-            return tuple_result
+        # Try unit pattern first: ()
+        unit_result = yield unit_pattern_parser().optional()
+        if unit_result is not None:
+            return unit_result
 
-        # Try grouped pattern: (pattern)
-        open_paren = yield match_token(LeftParenToken).optional()
-        if open_paren is not None:
-            # Parse inner pattern (can include cons)
-            inner = yield pattern_cons_parser()
-            yield match_token(RightParenToken)
-            return inner
+        # Try list pattern: [a, b, c]
+        list_result = yield list_pattern_parser().optional()
+        if list_result is not None:
+            return list_result
 
-        # Try literal pattern (deterministic: NumberToken/StringToken are disjoint from IdentifierToken)
+        # Try grouped or tuple pattern: (pattern) / (p1, p2)
+        grouped_or_tuple = yield grouped_or_tuple_pattern_parser().optional()
+        if grouped_or_tuple is not None:
+            return grouped_or_tuple
+
+        # Try literal pattern before identifiers.
         lit = yield pattern_literal_parser().optional()
         if lit is not None:
             return lit
 
-        # Fall back to simple identifier - returns flat pattern structure
+        # Fall back to simple identifier/wildcard.
         name_token = yield match_token(IdentifierToken).optional()
         if name_token is None:
             yield fail("expected pattern")
@@ -830,104 +887,98 @@ def pattern_atom_parser() -> P[SurfacePatternBase]:
         if name_token.value == "_":
             return SurfaceWildcardPattern(location=name_token.location)
 
-        return SurfacePattern(
-            patterns=[SurfaceVarPattern(name=name_token.value, location=name_token.location)],
-            location=name_token.location
-        )
+        return SurfaceVarPattern(name=name_token.value, location=name_token.location)
 
     return parser
 
 
-def pattern_base_parser() -> P[SurfacePatternBase]:
-    """Parse a base pattern: variable, constructor with args, or literal.
-
-    Returns a flat pattern list where all identifiers are SurfaceVarPattern,
-    or a SurfaceLitPattern for literal patterns.
-    The rename phase will disambiguate:
-    - [VarPat("x")] -> single item: variable or nullary constructor
-    - [VarPat("Cons"), VarPat("x"), ...] -> multiple items: constructor pattern
-
-    Examples:
-        x                    -> SurfacePattern(patterns=[VarPat("x")])
-        Cons x xs           -> SurfacePattern(patterns=[VarPat("Cons"), VarPat("x"), VarPat("xs")])
-        Cons (x, y) zs      -> SurfacePattern(patterns=[VarPat("Cons"), tuple, VarPat("zs")])
-        Pair (Cons x xs) y  -> SurfacePattern(patterns=[VarPat("Pair"), cons, VarPat("y")])
-        42                  -> SurfaceLitPattern(prim_type="Int", value=42)
-
-    Returns:
-        SurfacePattern or SurfaceLitPattern
-    """
+def grouped_or_tuple_pattern_parser() -> P[SurfacePatternBase]:
+    """Parse grouped or tuple pattern syntax starting with '('."""
 
     @generate
     def parser():
-        # Try literal pattern first (deterministic: disjoint token types)
-        lit = yield pattern_literal_parser().optional()
-        if lit is not None:
-            return lit
-
-        # Parse pattern name (constructor or variable)
-        name_token = yield match_token(IdentifierToken).optional()
-        if name_token is None:
-            yield fail("expected pattern")
-
-        name = name_token.value
-        loc = name_token.location
-
-        # Parse pattern arguments (atoms: identifiers, literals, tuples, grouped patterns)
-        args: list[SurfacePatternBase] = []
-        while True:
-            # Try to parse an atomic pattern
-            arg = yield pattern_atom_parser().optional()
-            if arg is None:
-                break
-            args.append(arg)
-
-        if name == "_":
-            if args:
-                yield fail("wildcard pattern _ cannot have arguments")
-            return SurfaceWildcardPattern(location=loc)
-
-        # Build flat pattern list: [VarPat(name), arg1, arg2, ...]
-        # All identifiers are SurfaceVarPattern - rename phase disambiguates
-        patterns: list[SurfacePatternBase] = [SurfaceVarPattern(name=name, location=loc)]
-        patterns.extend(args)
-        return SurfacePattern(patterns=patterns, location=loc)
-
-    return parser
-
-
-def pattern_tuple_parser() -> P[SurfacePattern]:
-    """Parse a tuple pattern: (p1, p2, ..., pn).
-
-    Sugar for nested Pair patterns: Pair p1 (Pair p2 (... pn))
-
-    Returns:
-        SurfacePatternTuple containing the elements
-    """
-
-    @generate
-    def parser():
-        from systemf.surface.types import SurfacePatternTuple
-
         open_paren = yield match_token(LeftParenToken)
         loc = open_paren.location
+        first = yield pattern_parser()
 
-        # Parse first element using pattern_parser (handles nested tuples, constructors, vars)
+        comma = yield match_token(CommaToken).optional()
+        if comma is None:
+            yield match_token(RightParenToken)
+            return first
+
+        elements = [first]
+        while True:
+            elem = yield pattern_parser()
+            elements.append(elem)
+            close_paren = yield match_token(RightParenToken).optional()
+            if close_paren is not None:
+                break
+            yield match_token(CommaToken)
+
+        return SurfacePatternTuple(elements=elements, location=loc)
+
+    return parser
+
+
+def unit_pattern_parser() -> P[SurfaceUnitPattern]:
+    """Parse the unit pattern syntax: ()."""
+
+    @generate
+    def parser():
+        token = yield match_token(UnitToken)
+        return SurfaceUnitPattern(location=token.location)
+
+    return parser
+
+
+def list_pattern_parser() -> P[SurfaceListPattern]:
+    """Parse list pattern syntax: [], [p1], [p1, p2, ..., pn]."""
+
+    @generate
+    def parser():
+        open_bracket = yield match_token(LeftBracketToken)
+        loc = open_bracket.location
+
+        close_bracket = yield match_token(RightBracketToken).optional()
+        if close_bracket is not None:
+            return SurfaceListPattern(elements=[], location=loc)
+
         first = yield pattern_parser()
         elements = [first]
 
-        # Parse comma-separated elements
         while True:
+            close_bracket = yield match_token(RightBracketToken).optional()
+            if close_bracket is not None:
+                break
             yield match_token(CommaToken)
             elem = yield pattern_parser()
             elements.append(elem)
 
-            # Check if we're at the closing paren
-            close_paren = yield match_token(RightParenToken).optional()
-            if close_paren is not None:
-                break
+        return SurfaceListPattern(elements=elements, location=loc)
 
-        return SurfacePatternTuple(elements=elements, location=loc)
+    return parser
+
+
+def pattern_seq_parser() -> P[SurfacePatternBase]:
+    """Parse a flat pattern sequence: p1 p2 ... pn.
+
+    This stays syntax-shaped and does not interpret the sequence yet.
+    """
+
+    @generate
+    def parser():
+        first = yield pattern_atom_parser()
+        loc = first.location
+        patterns = [first]
+        while True:
+            arg = yield pattern_atom_parser().optional()
+            if arg is None:
+                break
+            patterns.append(arg)
+
+        if len(patterns) == 1:
+            return first
+        return SurfacePatternSeq(patterns=patterns, location=loc)
 
     return parser
 
@@ -938,10 +989,10 @@ def pattern_cons_parser() -> P[SurfacePatternBase]:
     Examples:
         x : xs                -> SurfacePatternCons(head=x, tail=xs)
         x : y : zs           -> SurfacePatternCons(head=x, tail=SurfacePatternCons(head=y, tail=zs))
-        Cons x xs            -> SurfacePattern(patterns=[VarPat("Cons"), VarPat("x"), VarPat("xs")])
-        x                    -> SurfacePattern(patterns=[VarPat("x")])
-        (x)                  -> SurfacePattern(patterns=[VarPat("x")])
-        (Cons x xs)          -> SurfacePattern(patterns=[VarPat("Cons"), VarPat("x"), VarPat("xs")])
+        Cons x xs            -> SurfacePatternSeq(patterns=[VarPat("Cons"), VarPat("x"), VarPat("xs")])
+        x                    -> SurfaceVarPattern(name="x")
+        (x)                  -> SurfaceVarPattern(name="x")
+        (Cons x xs)          -> SurfacePatternSeq(patterns=[VarPat("Cons"), VarPat("x"), VarPat("xs")])
         (x : xs)             -> SurfacePatternCons(head=x, tail=xs)
         x : (y : zs)         -> SurfacePatternCons(head=x, tail=SurfacePatternCons(head=y, tail=zs))
 
@@ -952,17 +1003,12 @@ def pattern_cons_parser() -> P[SurfacePatternBase]:
 
     @generate
     def parser():
-        # Parse left side (try grouping first, then base pattern)
-        # Check if starts with '(' for grouping
-        open_paren = yield match_token(LeftParenToken).optional()
-        if open_paren is not None:
-            # Parse inner pattern (cons allowed inside parens)
-            inner = yield pattern_cons_parser()
-            yield match_token(RightParenToken)
-            left = inner
-        else:
-            # Regular base pattern (Constructor vars... or variable)
-            left = yield pattern_base_parser()
+        left = yield (
+            unit_pattern_parser()
+            | list_pattern_parser()
+            | grouped_or_tuple_pattern_parser()
+            | pattern_seq_parser()
+        )
 
         loc = left.location
 
@@ -983,16 +1029,11 @@ def pattern_parser() -> P[SurfacePatternBase]:
     """Parse a pattern: tuple, cons, constructor, or variable pattern.
 
     Returns:
-        SurfacePattern, SurfacePatternTuple, or SurfacePatternCons
+        SurfacePatternBase syntax node
     """
 
     @generate
     def parser():
-        # Try tuple pattern first (must have commas: (x, y))
-        tuple_result = yield pattern_tuple_parser().optional()
-        if tuple_result is not None:
-            return tuple_result
-
         # Try cons pattern (handles x : xs and falls back to base pattern)
         return (yield pattern_cons_parser())
 

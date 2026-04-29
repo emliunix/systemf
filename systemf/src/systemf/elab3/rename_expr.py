@@ -8,7 +8,7 @@ from typing import Protocol, cast
 
 from systemf.elab3 import name_gen
 
-from .builtins import BUILTIN_FALSE, BUILTIN_BIN_OPS, BUILTIN_LIST_CONS, BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_TRUE
+from .builtins import BUILTIN_FALSE, BUILTIN_BIN_OPS, BUILTIN_LIST, BUILTIN_LIST_CONS, BUILTIN_LIST_NIL, BUILTIN_MK_UNIT, BUILTIN_PAIR, BUILTIN_PAIR_MKPAIR, BUILTIN_TRUE, BUILTIN_UNIT
 
 from .reader_env import ImportRdrElt, ImportSpec, LocalRdrElt, QualName, RdrElt, RdrName, ReaderEnv, UnqualName
 from .types import Module, NameGenerator
@@ -22,8 +22,8 @@ from .types.ast import (
 from systemf.surface.types import (
     SurfaceAbs, SurfaceAnn, SurfaceApp, SurfaceBranch, SurfaceCase,
     SurfaceDataDeclaration, SurfaceDeclaration, SurfaceDeclarationRepr,
-    SurfaceIf, SurfaceLet,SurfaceLit, SurfaceLitPattern, SurfaceOp, SurfacePattern,
-    SurfacePatternBase, SurfacePatternCons, SurfacePatternTuple, SurfaceTerm,
+    SurfaceIf, SurfaceLet, SurfaceList, SurfaceListPattern, SurfaceListType,SurfaceLit, SurfaceLitPattern, SurfaceOp, SurfacePattern,
+    SurfacePatternBase, SurfacePatternCons, SurfacePatternSeq, SurfacePatternTuple, SurfaceTerm, SurfaceUnit, SurfaceUnitPattern, SurfaceUnitType,
     SurfaceWildcardPattern,
     SurfaceTermDeclaration, SurfaceTuple, SurfaceType, SurfaceTypeArrow,
     SurfaceTypeConstructor, SurfaceTypeForall, SurfaceTypeTuple, SurfaceTypeVar,
@@ -151,6 +151,14 @@ class RenameExpr:
                     self.rename_case_branch(b) for b in branches
                 ])
 
+            case SurfaceList(elements=elements):
+                return reduce(lambda acc, curr: App(App(Var(BUILTIN_LIST_CONS), curr), acc), reversed([
+                    self.rename_expr(e) for e in elements
+                ]), Var(BUILTIN_LIST_NIL))
+
+            case SurfaceUnit():
+                return Var(BUILTIN_MK_UNIT)
+
             case _:
                 raise Exception(f"unknown expr: {ast}")
 
@@ -186,18 +194,21 @@ class RenameExpr:
                     raise Exception(f"invalid tuple pattern: {els}")
 
         def _rename_pat(pat: SurfacePatternBase) -> Generator[Name, None, Pat]:
+            # TODO: check surface multi pattern support, though current language doesn't support it yet 
             match pat:
-                case SurfacePattern(patterns=[SurfaceVarPattern(name=var, location=loc)]):
+                case SurfaceVarPattern(name=var, location=loc):
                     match self.lookup_maybe(UnqualName(var)):
                         case [] | None:
                             name = self.new_name(var, loc)
                             yield name
                             return VarPat(name)
                         case [name]:
+                            # NOTE: it's hacky, but works, if the name is defined, it suggests it's likely a data constructor, 
+                            # hence a no-arg constructor pattern
                             return ConPat(name, [])
                         case xs:
                             raise Exception(f"multiple definition found for {var} at {loc}: {xs}")
-                case SurfacePattern(patterns=[SurfaceVarPattern(name=con), *pats]):
+                case SurfacePatternSeq(patterns=[SurfaceVarPattern(name=con), *pats]):
                     r = yield from _con_pat(self.lookup(UnqualName(con)), pats)
                     return r
                 case SurfacePatternCons(head=x, tail=xs):
@@ -210,6 +221,14 @@ class RenameExpr:
                     return LitPat(prim_to_lit(prim_ty, val))
                 case SurfaceWildcardPattern():
                     return WildcardPat()
+                case SurfaceUnitPattern():
+                    return ConPat(BUILTIN_MK_UNIT, [])
+                case SurfaceListPattern(elements=elements):
+                    el_pats = []
+                    for el in elements:
+                        pel = yield from _rename_pat(el)
+                        el_pats.append(pel)
+                    return reduce(lambda acc, curr: ConPat(BUILTIN_LIST_CONS, [curr, acc]), reversed(el_pats), ConPat(BUILTIN_LIST_NIL, []))
                 case _:
                     raise Exception(f"unknown pattern: {pat}")
 
@@ -247,6 +266,10 @@ class RenameExpr:
                 return reduce(lambda acc, curr: TyConApp(BUILTIN_PAIR, [curr, acc]), reversed([
                     self.rename_type(e) for e in elements
                 ]))
+            case SurfaceUnitType():
+                return TyConApp(BUILTIN_UNIT, [])
+            case SurfaceListType(element=elem_ty):
+                return TyConApp(BUILTIN_LIST, [self.rename_type(elem_ty)])
             case _:
                 raise Exception(f"unknown type: {ty}")
 

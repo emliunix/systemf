@@ -52,14 +52,19 @@ from systemf.surface.parser.types import (
     DotToken,
     ForallToken,
     IdentifierToken,
+    LeftBracketToken,
     LeftParenToken,
+    RightBracketToken,
     RightParenToken,
     TokenBase,
+    UnitToken,
     ValidIndent,
 )
 from systemf.surface.types import (
+    SurfaceListType,
     SurfaceType,
     SurfaceTypeConstructor,
+    SurfaceUnitType,
     SurfaceTypeVar,
 )
 
@@ -205,6 +210,23 @@ def type_tuple_parser() -> P[SurfaceType]:
     return SurfaceTypeTuple(elements=elements, location=loc)
 
 
+@generate
+def unit_type_parser() -> P[SurfaceType]:
+    """Parse unit type syntax: ()."""
+    token = yield match_token(UnitToken)
+    return SurfaceUnitType(location=token.location)
+
+
+@generate
+def type_list_parser() -> P[SurfaceType]:
+    """Parse list type syntax: [t]."""
+    open_bracket = yield match_token(LeftBracketToken)
+    loc = open_bracket.location
+    element = yield _type_parser
+    yield match_token(RightBracketToken)
+    return SurfaceListType(element=element, location=loc)
+
+
 def type_atom_parser() -> P[SurfaceType]:
     """Parse a type atom — the smallest syntactic unit of a type.
 
@@ -220,6 +242,14 @@ def type_atom_parser() -> P[SurfaceType]:
 
     @generate
     def parser():
+        unit_ty = yield unit_type_parser.optional()
+        if unit_ty is not None:
+            return unit_ty
+
+        list_ty = yield type_list_parser.optional()
+        if list_ty is not None:
+            return list_ty
+
         # Parenthesised type — layout constraint is reset inside parens.
         open_paren = yield match_token(LeftParenToken).optional()
         if open_paren is not None:

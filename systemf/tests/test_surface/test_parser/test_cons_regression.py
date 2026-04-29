@@ -16,8 +16,8 @@ from systemf.surface.types import (
     SurfaceAnn,
     SurfaceCase,
     SurfaceOp,
-    SurfacePattern,
     SurfacePatternCons,
+    SurfacePatternSeq,
     SurfacePatternTuple,
     SurfaceVarPattern,
 )
@@ -147,12 +147,11 @@ class TestGroupedPatternRegression:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
         # Should be equivalent to just 'x'
-        assert result.branches[0].pattern.patterns[0].name == "x"
+        assert isinstance(result.branches[0].pattern, SurfaceVarPattern)
+        assert result.branches[0].pattern.name == "x"
 
     def test_grouped_constructor(self):
         """Grouped constructor: (Cons x xs)"""
-        from systemf.surface.types import SurfacePattern
-
         source = """case xs of
   (Cons x xs) → x
   Nil → 0"""
@@ -160,8 +159,9 @@ class TestGroupedPatternRegression:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert isinstance(result, SurfaceCase)
         pattern = result.branches[0].pattern
+        assert isinstance(pattern, SurfacePatternSeq)
         assert pattern.patterns[0].name == "Cons"
-        var_constructors = [v.patterns[0].name for v in pattern.patterns[1:] if isinstance(v, SurfacePattern)]
+        var_constructors = [v.name for v in pattern.patterns[1:] if isinstance(v, SurfaceVarPattern)]
         assert "x" in var_constructors
         assert "xs" in var_constructors
 

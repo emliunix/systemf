@@ -24,6 +24,7 @@ from systemf.surface.parser.types import (
     DocstringToken,
     PragmaToken,
     DocstringType,
+    UnitToken,
 )
 from systemf.surface.types import (
     SurfaceDeclaration,
@@ -43,7 +44,7 @@ from systemf.surface.parser.type_parser import (
 
 # Import expression parser for term declaration bodies
 from systemf.surface.parser.expressions import expr_parser as _expr_parser_factory
-from systemf.surface.parser.helpers import AfterPos
+from systemf.surface.parser.helpers import AfterPos, match_token
 
 
 def skip_inline_docstrings() -> P[None]:
@@ -473,20 +474,24 @@ def import_decl_parser() -> P[SurfaceImportDeclaration]:
         if hiding_kw is not None:
             hiding = True
 
-        open_paren = yield (match_symbol("(")).optional()
-        if open_paren is not None:
-            first_item = yield match_ident().optional()
-            item_names: list[str] = []
-            if first_item is not None:
-                item_names = [first_item.value]
-                while True:
-                    comma = yield (match_symbol(",")).optional()
-                    if comma is None:
-                        break
-                    item_token = yield match_ident()
-                    item_names.append(item_token.value)
-            yield match_symbol(")")
-            items = item_names
+        unit_token = yield match_token(UnitToken).optional()
+        if unit_token is not None:
+            items = []
+        else:
+            open_paren = yield (match_symbol("(")).optional()
+            if open_paren is not None:
+                first_item = yield match_ident().optional()
+                item_names: list[str] = []
+                if first_item is not None:
+                    item_names = [first_item.value]
+                    while True:
+                        comma = yield (match_symbol(",")).optional()
+                        if comma is None:
+                            break
+                        item_token = yield match_ident()
+                        item_names.append(item_token.value)
+                yield match_symbol(")")
+                items = item_names
 
         return SurfaceImportDeclaration(
             module=module_name,

@@ -19,18 +19,25 @@ from systemf.surface.parser import (
 from systemf.surface.types import (
     SurfaceVar,
     SurfaceLit,
+    SurfaceList,
     SurfaceAbs,
     SurfaceApp,
     SurfaceCase,
     SurfaceBranch,
-    SurfacePattern,
+    SurfaceListPattern,
+    SurfacePatternCons,
+    SurfacePatternSeq,
+    SurfacePatternTuple,
     SurfaceLitPattern,
     SurfaceLet,
+    SurfaceTuple,
     SurfaceVarPattern,
+    SurfaceUnitPattern,
     SurfaceWildcardPattern,
     SurfaceOp,
     SurfacePrimTypeDecl,
     SurfacePrimOpDecl,
+    SurfaceUnit,
 )
 from systemf.utils.ast_utils import equals_ignore_location
 
@@ -72,6 +79,64 @@ class TestAtomParser:
         result = atom_parser().parse(tokens)
         assert isinstance(result, SurfaceVar)
         assert result.name == "x"
+
+    def test_unit_literal(self):
+        """Parse unit syntax: ()."""
+        tokens = lex("()")
+        result = atom_parser().parse(tokens)
+        assert equals_ignore_location(result, SurfaceUnit())
+
+    def test_unit_literal_with_spaces(self):
+        """Parse unit syntax with spaces: (   )."""
+        tokens = lex("(   )")
+        result = atom_parser().parse(tokens)
+        assert equals_ignore_location(result, SurfaceUnit())
+
+    def test_empty_list_literal(self):
+        """Parse empty list syntax: []."""
+        tokens = lex("[]")
+        result = atom_parser().parse(tokens)
+        assert equals_ignore_location(result, SurfaceList(elements=[]))
+
+    def test_list_literal(self):
+        """Parse list syntax: [1, x, True]."""
+        tokens = lex("[1, x, True]")
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceList(
+            elements=[
+                SurfaceLit(prim_type="Int", value=1),
+                SurfaceVar(name="x"),
+                SurfaceVar(name="True"),
+            ]
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_nested_list_literal(self):
+        """Parse nested list syntax: [[1], []]."""
+        tokens = lex("[[1], []]")
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceList(
+            elements=[
+                SurfaceList(elements=[SurfaceLit(prim_type="Int", value=1)]),
+                SurfaceList(elements=[]),
+            ]
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_tuple_with_unit_and_list(self):
+        """Parse tuple containing unit and list syntax."""
+        tokens = lex("((), [1, 2])")
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceTuple(
+            elements=[
+                SurfaceUnit(),
+                SurfaceList(elements=[
+                    SurfaceLit(prim_type="Int", value=1),
+                    SurfaceLit(prim_type="Int", value=2),
+                ]),
+            ]
+        )
+        assert equals_ignore_location(result, expected)
 
 
 class TestLambdaParser:
@@ -183,78 +248,308 @@ class TestCaseParser:
 
     def test_case_with_tuple_pattern(self):
         """Parse case with tuple pattern."""
-        from systemf.surface.types import SurfacePatternTuple
-
         source = """case p of
   (x, y) → x + y"""
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        assert isinstance(result.branches[0].pattern, SurfacePatternTuple)
-        assert len(result.branches[0].pattern.elements) == 2
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="p"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternTuple(
+                        elements=[SurfaceVarPattern(name="x"), SurfaceVarPattern(name="y")]
+                    ),
+                    body=SurfaceOp(
+                        left=SurfaceVar(name="x"),
+                        op="+",
+                        right=SurfaceVar(name="y"),
+                    ),
+                )
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_case_with_unit_pattern(self):
+        """Parse case with unit pattern."""
+        source = """case x of
+  () → 1"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="x"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfaceUnitPattern(),
+                    body=SurfaceLit(prim_type="Int", value=1),
+                )
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_case_with_empty_list_pattern(self):
+        """Parse case with empty list pattern."""
+        source = """case xs of
+  [] → 0"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfaceListPattern(elements=[]),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                )
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_case_with_list_pattern(self):
+        """Parse case with list pattern."""
+        source = """case xs of
+  [a, b, c] → a"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfaceListPattern(elements=[
+                        SurfaceVarPattern(name="a"),
+                        SurfaceVarPattern(name="b"),
+                        SurfaceVarPattern(name="c"),
+                    ]),
+                    body=SurfaceVar(name="a"),
+                )
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_case_with_nested_list_pattern(self):
+        """Parse case with nested list pattern."""
+        source = """case xs of
+  [[x], []] → x"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfaceListPattern(elements=[
+                        SurfaceListPattern(elements=[
+                            SurfaceVarPattern(name="x"),
+                        ]),
+                        SurfaceListPattern(elements=[]),
+                    ]),
+                    body=SurfaceVar(name="x"),
+                )
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_case_with_tuple_of_unit_and_list_patterns(self):
+        """Parse tuple pattern mixing unit and list syntax."""
+        source = """case x of
+  ((), [a, b]) → a"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="x"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternTuple(elements=[
+                        SurfaceUnitPattern(),
+                        SurfaceListPattern(elements=[
+                            SurfaceVarPattern(name="a"),
+                            SurfaceVarPattern(name="b"),
+                        ]),
+                    ]),
+                    body=SurfaceVar(name="a"),
+                )
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_case_with_list_head_cons_pattern(self):
+        """Parse cons pattern whose head is a list pattern."""
+        source = """case xss of
+  [x] : xss -> x"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xss"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternCons(
+                        head=SurfaceListPattern(elements=[
+                            SurfaceVarPattern(name="x"),
+                        ]),
+                        tail=SurfaceVarPattern(name="xss"),
+                    ),
+                    body=SurfaceVar(name="x"),
+                )
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_case_with_unit_head_cons_pattern(self):
+        """Parse cons pattern whose head is a unit pattern."""
+        source = """case xs of
+  () : rest -> 0"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternCons(
+                        head=SurfaceUnitPattern(),
+                        tail=SurfaceVarPattern(name="rest"),
+                    ),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                )
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_unhappy_unit_literal_with_newline(self):
+        """Unit token should not accept newlines between parens."""
+        with pytest.raises(Exception):
+            expr_parser(AnyIndent()).parse(lex("(\n)"))
+
+    def test_unhappy_list_literal_trailing_comma(self):
+        """Reject trailing comma in list literal."""
+        with pytest.raises(Exception):
+            expr_parser(AnyIndent()).parse(lex("[1,]"))
+
+    def test_unhappy_list_pattern_trailing_comma(self):
+        """Reject trailing comma in list pattern."""
+        with pytest.raises(Exception):
+            expr_parser(AnyIndent()).parse(lex("case xs of [x,] -> x"))
 
     def test_case_with_triple_pattern(self):
         """Parse case with triple pattern."""
-        from systemf.surface.types import SurfacePatternTuple
-
         source = """case t of
   (a, b, c) → a"""
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        assert isinstance(result.branches[0].pattern, SurfacePatternTuple)
-        assert len(result.branches[0].pattern.elements) == 3
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="t"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternTuple(
+                        elements=[
+                            SurfaceVarPattern(name="a"),
+                            SurfaceVarPattern(name="b"),
+                            SurfaceVarPattern(name="c"),
+                        ]
+                    ),
+                    body=SurfaceVar(name="a"),
+                )
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_case_with_braces(self):
         """Parse case with explicit braces: case x of { True → 1 | False → 0 }."""
         source = "case x of { True → 1 | False → 0 }"
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        assert len(result.branches) == 2
-        assert result.branches[0].pattern.patterns[0].name == "True"
-        assert result.branches[1].pattern.patterns[0].name == "False"
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="x"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfaceVarPattern(name="True"),
+                    body=SurfaceLit(prim_type="Int", value=1),
+                ),
+                SurfaceBranch(
+                    pattern=SurfaceVarPattern(name="False"),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_case_with_braces_multiple_patterns(self):
         """Parse case with braces and multiple patterns."""
         source = "case mx of { Nothing → 0 | Just x → x }"
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        assert len(result.branches) == 2
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="mx"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfaceVarPattern(name="Nothing"),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                ),
+                SurfaceBranch(
+                    pattern=SurfacePatternSeq(
+                        patterns=[
+                            SurfaceVarPattern(name="Just"),
+                            SurfaceVarPattern(name="x"),
+                        ]
+                    ),
+                    body=SurfaceVar(name="x"),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_case_with_cons_pattern(self):
         """Parse case with cons pattern: x : xs."""
-        from systemf.surface.types import SurfacePatternCons
-
         source = """case xs of
   x : xs → x
   Nil → 0"""
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        assert len(result.branches) == 2
-        # First branch should have cons pattern
-        assert isinstance(result.branches[0].pattern, SurfacePatternCons)
-        assert result.branches[0].pattern.head is not None
-        assert result.branches[0].pattern.tail is not None
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternCons(
+                        head=SurfaceVarPattern(name="x"),
+                        tail=SurfaceVarPattern(name="xs"),
+                    ),
+                    body=SurfaceVar(name="x"),
+                ),
+                SurfaceBranch(
+                    pattern=SurfaceVarPattern(name="Nil"),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_case_with_nested_cons_pattern(self):
         """Parse case with nested cons pattern: x : y : zs."""
-        from systemf.surface.types import SurfacePatternCons
-
         source = """case xs of
   x : y : zs → x + y
   Nil → 0"""
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        assert len(result.branches) == 2
-        # First branch should have cons pattern
-        cons_pattern = result.branches[0].pattern
-        assert isinstance(cons_pattern, SurfacePatternCons)
-        # Should be right-associative: x : (y : zs)
-        assert isinstance(cons_pattern.tail, SurfacePatternCons)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternCons(
+                        head=SurfaceVarPattern(name="x"),
+                        tail=SurfacePatternCons(
+                            head=SurfaceVarPattern(name="y"),
+                            tail=SurfaceVarPattern(name="zs"),
+                        ),
+                    ),
+                    body=SurfaceOp(
+                        left=SurfaceVar(name="x"),
+                        op="+",
+                        right=SurfaceVar(name="y"),
+                    ),
+                ),
+                SurfaceBranch(
+                    pattern=SurfaceVarPattern(name="Nil"),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_case_with_grouped_pattern(self):
         """Parse case with grouped pattern: (x)."""
@@ -263,36 +558,77 @@ class TestCaseParser:
   Nil → 0"""
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        # Grouped pattern should be equivalent to just 'x'
-        assert result.branches[0].pattern.patterns[0].name == "x"
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfaceVarPattern(name="x"),
+                    body=SurfaceVar(name="x"),
+                ),
+                SurfaceBranch(
+                    pattern=SurfaceVarPattern(name="Nil"),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_case_with_grouped_cons(self):
         """Parse case with grouped cons pattern: (x : xs)."""
-        from systemf.surface.types import SurfacePatternCons
-
         source = """case xs of
   (x : xs) → x
   Nil → 0"""
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        assert isinstance(result.branches[0].pattern, SurfacePatternCons)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternCons(
+                        head=SurfaceVarPattern(name="x"),
+                        tail=SurfaceVarPattern(name="xs"),
+                    ),
+                    body=SurfaceVar(name="x"),
+                ),
+                SurfaceBranch(
+                    pattern=SurfaceVarPattern(name="Nil"),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_case_with_nested_grouped_cons(self):
         """Parse case with nested grouped cons: (x : (y : zs))."""
-        from systemf.surface.types import SurfacePatternCons
-
         source = """case xs of
   (x : (y : zs)) → x + y
   Nil → 0"""
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        cons_pattern = result.branches[0].pattern
-        assert isinstance(cons_pattern, SurfacePatternCons)
-        # Should be right-associative: x : (y : zs)
-        assert isinstance(cons_pattern.tail, SurfacePatternCons)
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="xs"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternCons(
+                        head=SurfaceVarPattern(name="x"),
+                        tail=SurfacePatternCons(
+                            head=SurfaceVarPattern(name="y"),
+                            tail=SurfaceVarPattern(name="zs"),
+                        ),
+                    ),
+                    body=SurfaceOp(
+                        left=SurfaceVar(name="x"),
+                        op="+",
+                        right=SurfaceVar(name="y"),
+                    ),
+                ),
+                SurfaceBranch(
+                    pattern=SurfaceVarPattern(name="Nil"),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_case_with_int_literal_pattern(self):
         """Parse case with integer literal pattern."""
@@ -305,7 +641,7 @@ class TestCaseParser:
             scrutinee=SurfaceVar(name="n"),
             branches=[
                 SurfaceBranch(pattern=SurfaceLitPattern(prim_type="Int", value=0), body=SurfaceLit(prim_type="Int", value=1)),
-                SurfaceBranch(pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="m")]), body=SurfaceOp(left=SurfaceVar(name="m"), op="*", right=SurfaceLit(prim_type="Int", value=2))),
+                SurfaceBranch(pattern=SurfaceVarPattern(name="m"), body=SurfaceOp(left=SurfaceVar(name="m"), op="*", right=SurfaceLit(prim_type="Int", value=2))),
             ],
         )
         assert equals_ignore_location(result, expected)
@@ -321,28 +657,43 @@ class TestCaseParser:
             scrutinee=SurfaceVar(name="s"),
             branches=[
                 SurfaceBranch(pattern=SurfaceLitPattern(prim_type="String", value="hello"), body=SurfaceLit(prim_type="Int", value=1)),
-                SurfaceBranch(pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="msg")]), body=SurfaceLit(prim_type="Int", value=0)),
+                SurfaceBranch(pattern=SurfaceVarPattern(name="msg"), body=SurfaceLit(prim_type="Int", value=0)),
             ],
         )
         assert equals_ignore_location(result, expected)
 
     def test_case_with_constructor_tuple_arg(self):
         """Parse case with constructor taking tuple: Pair (x, y) z."""
-        from systemf.surface.types import SurfacePatternTuple
-
         source = """case p of
   Pair (x, y) z → x
   _ → 0"""
         tokens = lex(source)
         result = expr_parser(AnyIndent()).parse(tokens)
-        assert isinstance(result, SurfaceCase)
-        pattern = result.branches[0].pattern
-        assert isinstance(pattern, SurfacePattern)
-        # Should have 3 items: Pair constructor + 2 args (tuple and z)
-        assert len(pattern.patterns) == 3
-        # First item is the constructor name
-        assert isinstance(pattern.patterns[0], SurfaceVarPattern)
-        assert pattern.patterns[0].name == "Pair"
+        expected = SurfaceCase(
+            scrutinee=SurfaceVar(name="p"),
+            branches=[
+                SurfaceBranch(
+                    pattern=SurfacePatternSeq(
+                        patterns=[
+                            SurfaceVarPattern(name="Pair"),
+                            SurfacePatternTuple(
+                                elements=[
+                                    SurfaceVarPattern(name="x"),
+                                    SurfaceVarPattern(name="y"),
+                                ]
+                            ),
+                            SurfaceVarPattern(name="z"),
+                        ]
+                    ),
+                    body=SurfaceVar(name="x"),
+                ),
+                SurfaceBranch(
+                    pattern=SurfaceWildcardPattern(),
+                    body=SurfaceLit(prim_type="Int", value=0),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
 
     def test_nested_case_with_braces(self):
         """Parse nested case with outer layout and inner braces."""
@@ -368,17 +719,7 @@ class TestCaseParser:
         braces_tokens = lex(braces_source)
         braces_result = expr_parser(AnyIndent()).parse(braces_tokens)
 
-        # Both should produce 2 branches
-        assert len(layout_result.branches) == len(braces_result.branches) == 2
-        # Branch patterns should be equivalent (check constructor name)
-        assert (
-            layout_result.branches[0].pattern.patterns[0].name
-            == braces_result.branches[0].pattern.patterns[0].name
-        )
-        assert (
-            layout_result.branches[1].pattern.patterns[0].name
-            == braces_result.branches[1].pattern.patterns[0].name
-        )
+        assert equals_ignore_location(layout_result, braces_result)
 
 
 class TestLiteralPattern:
@@ -411,7 +752,7 @@ class TestLiteralPattern:
             scrutinee=SurfaceVar(name="s"),
             branches=[
                 SurfaceBranch(pattern=SurfaceLitPattern(prim_type="String", value="hello"), body=SurfaceLit(prim_type="Int", value=0)),
-                SurfaceBranch(pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="other")]), body=SurfaceLit(prim_type="Int", value=1)),
+                SurfaceBranch(pattern=SurfaceVarPattern(name="other"), body=SurfaceLit(prim_type="Int", value=1)),
             ],
         )
         assert equals_ignore_location(result, expected)
@@ -427,15 +768,15 @@ class TestLiteralPattern:
             scrutinee=SurfaceVar(name="xs"),
             branches=[
                 SurfaceBranch(
-                    pattern=SurfacePattern(patterns=[
+                    pattern=SurfacePatternSeq(patterns=[
                         SurfaceVarPattern(name="Cons"),
                         SurfaceLitPattern(prim_type="Int", value=0),
-                        SurfacePattern(patterns=[SurfaceVarPattern(name="rest")]),
+                        SurfaceVarPattern(name="rest"),
                     ]),
                     body=SurfaceVar(name="rest"),
                 ),
                 SurfaceBranch(
-                    pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="Nil")]),
+                    pattern=SurfaceVarPattern(name="Nil"),
                     body=SurfaceVar(name="Nil"),
                 ),
             ],
@@ -465,7 +806,7 @@ class TestLiteralPattern:
             scrutinee=SurfaceVar(name="s"),
             branches=[
                 SurfaceBranch(pattern=SurfaceLitPattern(prim_type="String", value="hello"), body=SurfaceLit(prim_type="Int", value=0)),
-                SurfaceBranch(pattern=SurfacePattern(patterns=[SurfaceVarPattern(name="other")]), body=SurfaceLit(prim_type="Int", value=1)),
+                SurfaceBranch(pattern=SurfaceVarPattern(name="other"), body=SurfaceLit(prim_type="Int", value=1)),
             ],
         )
         assert equals_ignore_location(result, expected)

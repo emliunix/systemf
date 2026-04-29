@@ -18,10 +18,12 @@ from systemf.surface.parser import (
     import_decl_parser,
 )
 from systemf.surface.types import (
+    SurfaceListType,
     SurfaceDataDeclaration,
     SurfaceImportDeclaration,
     SurfacePrimOpDecl,
     SurfacePrimTypeDecl,
+    SurfaceUnitType,
     SurfaceTermDeclaration,
     SurfaceTypeConstructor,
     SurfaceTypeApp,
@@ -520,11 +522,16 @@ class TestTypeParser:
         assert result is not None
 
     def test_unit_type(self):
-        """Parse Unit type constructor (defined in prelude)."""
-        tokens = lex("Unit")
+        """Parse unit type syntax: ()."""
+        tokens = lex("()")
         result = type_parser().parse(tokens)
-        assert isinstance(result, SurfaceTypeConstructor)
-        assert result.name == "Unit"
+        assert isinstance(result, SurfaceUnitType)
+
+    def test_unit_type_with_spaces(self):
+        """Parse unit type syntax with spaces: (   )."""
+        tokens = lex("(   )")
+        result = type_parser().parse(tokens)
+        assert isinstance(result, SurfaceUnitType)
 
     def test_tuple_type(self):
         """Parse (Int, Bool) tuple."""
@@ -536,6 +543,50 @@ class TestTypeParser:
         assert result.elements[0].name == "Int"
         assert isinstance(result.elements[1], SurfaceTypeConstructor)
         assert result.elements[1].name == "Bool"
+
+    def test_list_type(self):
+        """Parse list type syntax: [Int]."""
+        tokens = lex("[Int]")
+        result = type_parser().parse(tokens)
+        expected = SurfaceListType(
+            element=SurfaceTypeConstructor(name="Int", args=[]),
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_nested_list_type(self):
+        """Parse nested list type syntax: [[Int]]."""
+        tokens = lex("[[Int]]")
+        result = type_parser().parse(tokens)
+        expected = SurfaceListType(
+            element=SurfaceListType(
+                element=SurfaceTypeConstructor(name="Int", args=[]),
+            ),
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_tuple_with_unit_and_list_types(self):
+        """Parse tuple type mixing unit and list syntax."""
+        tokens = lex("((), [Int])")
+        result = type_parser().parse(tokens)
+        expected = SurfaceTypeTuple(
+            elements=[
+                SurfaceUnitType(),
+                SurfaceListType(
+                    element=SurfaceTypeConstructor(name="Int", args=[]),
+                ),
+            ],
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_unhappy_unit_type_with_newline(self):
+        """Unit type token should not accept newlines between parens."""
+        with pytest.raises(Exception):
+            type_parser().parse(lex("(\n)"))
+
+    def test_unhappy_list_type_missing_closing_bracket(self):
+        """Reject incomplete list type syntax."""
+        with pytest.raises(Exception):
+            type_parser().parse(lex("[Int"))
 
     def test_rank2_type(self):
         """Parse rank-2 type (forall a. a -> a) -> Int."""

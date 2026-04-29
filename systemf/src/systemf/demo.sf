@@ -28,6 +28,38 @@ head :: forall a. List a -> a = \xs ->
   case xs of
     Cons x _ -> x
 
+-- | Unit syntax value
+unitValue :: Unit = ()
+
+-- | List syntax value
+listLiteral :: List Int = [1, 2, 3]
+
+-- | Empty list syntax value
+emptyList :: List Int = []
+
+-- | Nested list syntax value
+nestedListLiteral :: List (List Int) = [[1], []]
+
+-- | Tuple with unit and list syntax value
+unitListTuple :: Pair Unit (List Int) = ((), [1, 2])
+
+-- | Unit pattern syntax
+unitToInt :: Unit -> Int = \u ->
+  case u of
+    () -> 1
+
+-- | Empty list pattern syntax
+isEmptySyntax :: List Int -> Bool = \xs ->
+  case xs of
+    [] -> True
+    _ -> False
+
+-- | List pattern syntax
+sumListLiteral :: List Int -> Int = \xs ->
+  case xs of
+    [a, b, c] -> a + b + c
+    _ -> 0
+
 -- =============================================================================
 -- Custom polymorphic data types
 -- =============================================================================

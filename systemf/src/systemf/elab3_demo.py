@@ -104,6 +104,34 @@ async def main() -> None:
     await check(session, "odd 3", VData(0, []))
     await check(session, "odd 4", VData(1, []))
     await check(session, "testConstMono", VLit(LitInt(1)))
+    await check(session, "unitValue", VData(0, []))
+    await check(
+        session,
+        "listLiteral",
+        VData(1, [VLit(LitInt(1)), VData(1, [VLit(LitInt(2)), VData(1, [VLit(LitInt(3)), VData(0, [])])])]),
+    )
+    await check(session, "emptyList", VData(0, []))
+    await check(
+        session,
+        "nestedListLiteral",
+        VData(
+            1,
+            [
+                VData(1, [VLit(LitInt(1)), VData(0, [])]),
+                VData(1, [VData(0, []), VData(0, [])]),
+            ],
+        ),
+    )
+    await check(
+        session,
+        "unitListTuple",
+        VData(0, [VData(0, []), VData(1, [VLit(LitInt(1)), VData(1, [VLit(LitInt(2)), VData(0, [])])])]),
+    )
+    await check(session, "unitToInt ()", VLit(LitInt(1)))
+    await check(session, "isEmptySyntax []", VData(0, []))
+    await check(session, "isEmptySyntax [1]", VData(1, []))
+    await check(session, "sumListLiteral [1, 2, 3]", VLit(LitInt(6)))
+    await check(session, "sumListLiteral [1, 2]", VLit(LitInt(0)))
 
     # Ref tests
     print("\n  --- Ref ---")

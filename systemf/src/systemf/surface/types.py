@@ -130,7 +130,27 @@ class SurfaceTypeTuple(SurfaceType):
         return f"({elems_str})"
 
 
-type SurfaceTypeRepr = SurfaceTypeVar | SurfaceTypeArrow | SurfaceTypeForall | SurfaceTypeConstructor | SurfaceTypeTuple
+@dataclass(frozen=True, kw_only=True)
+class SurfaceUnitType(SurfaceType):
+    """Unit type syntax: ()."""
+
+    @override
+    def __str__(self) -> str:
+        return "()"
+
+
+@dataclass(frozen=True, kw_only=True)
+class SurfaceListType(SurfaceType):
+    """List type syntax: [t]."""
+
+    element: SurfaceType
+
+    @override
+    def __str__(self) -> str:
+        return f"[{self.element}]"
+
+
+type SurfaceTypeRepr = SurfaceTypeVar | SurfaceTypeArrow | SurfaceTypeForall | SurfaceTypeConstructor | SurfaceTypeTuple | SurfaceUnitType | SurfaceListType
 
 
 # =============================================================================
@@ -388,6 +408,27 @@ class SurfaceTuple(SurfaceTerm):
         return f"({elems_str})"
 
 
+@dataclass(frozen=True, kw_only=True)
+class SurfaceUnit(SurfaceTerm):
+    """Unit expression syntax: ()."""
+
+    @override
+    def __str__(self) -> str:
+        return "()"
+
+
+@dataclass(frozen=True, kw_only=True)
+class SurfaceList(SurfaceTerm):
+    """List expression syntax: [e1, e2, ..., en]."""
+
+    elements: list[SurfaceTerm]
+
+    @override
+    def __str__(self) -> str:
+        elems_str = ", ".join(str(e) for e in self.elements)
+        return f"[{elems_str}]"
+
+
 class SurfacePatternBase(SurfaceNode):
     """Base class for all surface patterns."""
 
@@ -434,6 +475,21 @@ class SurfacePattern(SurfacePatternBase):
 
 
 @dataclass(frozen=True, kw_only=True)
+class SurfacePatternSeq(SurfacePatternBase):
+    """Explicit flat pattern sequence syntax: p1 p2 ... pn.
+
+    This is the surface-syntax-shaped representation for constructor-style
+    pattern application and for any future multi-pattern syntax.
+    """
+
+    patterns: list[SurfacePatternBase]
+
+    @override
+    def __str__(self) -> str:
+        return ' '.join(str(p) for p in self.patterns)
+
+
+@dataclass(frozen=True, kw_only=True)
 class SurfacePatternTuple(SurfacePatternBase):
     """Tuple pattern: (p1, p2, ..., pn) - desugars to nested Pairs.
 
@@ -446,6 +502,27 @@ class SurfacePatternTuple(SurfacePatternBase):
     def __str__(self) -> str:
         elems_str = ", ".join(str(e) for e in self.elements)
         return f"({elems_str})"
+
+
+@dataclass(frozen=True, kw_only=True)
+class SurfaceUnitPattern(SurfacePatternBase):
+    """Unit pattern syntax: ()."""
+
+    @override
+    def __str__(self) -> str:
+        return "()"
+
+
+@dataclass(frozen=True, kw_only=True)
+class SurfaceListPattern(SurfacePatternBase):
+    """List pattern syntax: [p1, p2, ..., pn]."""
+
+    elements: list[SurfacePatternBase]
+
+    @override
+    def __str__(self) -> str:
+        elems_str = ", ".join(str(e) for e in self.elements)
+        return f"[{elems_str}]"
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -513,7 +590,10 @@ type SurfaceTermRepr = (
     SurfaceCase |
     SurfaceLit |
     GlobalVar |
-    SurfaceOp )
+    SurfaceOp |
+    SurfaceTuple |
+    SurfaceUnit |
+    SurfaceList )
 
 
 # =============================================================================

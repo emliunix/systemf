@@ -60,6 +60,7 @@ from systemf.surface.parser.types import (
     # Concrete delimiter tokens
     LeftParenToken,
     RightParenToken,
+    UnitToken,
     LeftBracketToken,
     RightBracketToken,
     LeftBraceToken,
@@ -131,6 +132,7 @@ class Lexer:
         ("AT", r"@"),
         ("DOT", r"\."),
         # Delimiters
+        ("UNIT", r"\([ \t]*\)"),
         ("LPAREN", r"\("),
         ("RPAREN", r"\)"),
         ("LBRACKET", r"\["),
@@ -393,6 +395,8 @@ class Lexer:
             return AtToken(operator=value, location=loc)
         elif token_type == "DOT":
             return DotToken(operator=value, location=loc)
+        elif token_type == "UNIT":
+            return UnitToken(delimiter=value, location=loc)
         elif token_type == "LPAREN":
             return LeftParenToken(delimiter=value, location=loc)
         elif token_type == "RPAREN":

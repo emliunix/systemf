@@ -457,6 +457,11 @@ class RightParenToken(DelimiterToken):
 
 
 @dataclass(frozen=True, kw_only=True)
+class UnitToken(DelimiterToken):
+    delimiter: str = "()"
+
+
+@dataclass(frozen=True, kw_only=True)
 class LeftBracketToken(DelimiterToken):
     delimiter: str = "["
 
@@ -622,6 +627,7 @@ __all__ = [
     "DelimiterToken",
     "LeftParenToken",
     "RightParenToken",
+    "UnitToken",
     "LeftBracketToken",
     "RightBracketToken",
     "LeftBraceToken",

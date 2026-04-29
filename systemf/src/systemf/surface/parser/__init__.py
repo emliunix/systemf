@@ -79,6 +79,7 @@ from systemf.surface.parser.types import (
     # Concrete delimiter tokens
     LeftParenToken,
     RightParenToken,
+    UnitToken,
     LeftBracketToken,
     RightBracketToken,
     LeftBraceToken,
@@ -308,6 +309,7 @@ __all__ = [
     "DoubleColonToken",
     "DelimiterToken",
     "DelimiterType",
+    "UnitToken",
     "PragmaToken",
     "DocstringToken",
     "EOFToken",
