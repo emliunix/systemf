@@ -162,7 +162,7 @@ class TypeChecker(Unifier):
         
         def _core() -> CoreTm:
             mr = self.matchc.matchc(arg_ids, res_ty, [(arg_pats, MRInfallible(body_c()))])
-            body = mr_run(mr, self.error_expr(res_ty, "Unexhaustive patterns"))
+            body = mr_run(mr, self.error_expr(res_ty, "Non-exhaustive patterns"))
             return functools.reduce(lambda body, id: C.lam(id, body), reversed(arg_ids), body)
 
         return self.with_wrapper(w, _core)
@@ -186,7 +186,7 @@ class TypeChecker(Unifier):
         def _core() -> CoreTm:
             eqns = [([p], cast(MatchResult, MRInfallible(rhs()))) for p, rhs in brs]
             mr = self.matchc.matchc([scr_id], scr_ty, eqns)
-            return C.let(scr_id, scr_c(), mr_run(mr, self.error_expr(res_ty, "Unexhaustive patterns")))
+            return C.let(scr_id, scr_c(), mr_run(mr, self.error_expr(res_ty, "Non-exhaustive patterns")))
 
         return _core
 
