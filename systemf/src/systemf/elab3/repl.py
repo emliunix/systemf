@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast, override
 
+from systemf.elab3.types.ast import ImportDecl
 from systemf.elab3.types.synths import PrimOpsSynth, SynthChain, SynthRouter
 from systemf.utils.uniq import Uniq
 
@@ -118,12 +119,14 @@ class REPL(REPLContext, Synthesizer):
 
     def new_session(self) -> REPLSession:
         """Create a new REPL session with given state."""
-        return REPLSession(
+        session = REPLSession(
             self,
             repl_rdr_env=ReaderEnv.empty(),
             tythings=[],
             mod_insts={},
         )
+        session.add_import(ImportDecl(module="builtins"))
+        return session
 
 
 def _builtins_primops() -> dict[str, Val]:

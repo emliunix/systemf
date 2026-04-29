@@ -45,7 +45,8 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 6. **Unit literal syntax**: Support `()` as shorthand for `MkUnit`
 7. **Documentation**: User-facing surface language syntax docs
 8. **Ambiguous variable resolution not reported in source files** `#issue`: When a name resolves to multiple candidates (e.g., imported from multiple modules), the renamer currently accepts the first match silently. This is correct behavior for the REPL (where shadowing is allowed), but should be a hard error when loading source code files.
-9. **Generalization produces unreadable skolem names** `#issue`: Skolem type variables are printed as `$a1234`, which is hard to recognize. Should pick a human-readable representative name (e.g., from the original bound variable) during generalization.
+9. **`:info map` doesn't work with builtins imported** `#issue`: Even after importing builtins into the REPL environment, `:info map` fails to resolve or display information for builtin names. The `:info` command should consult the same imported/builtin namespace that expression lookup uses.
+10. **Generalization produces unreadable skolem names** `#issue`: Skolem type variables are printed as `$a1234`, which is hard to recognize. Should pick a human-readable representative name (e.g., from the original bound variable) during generalization.
 
 ## Entry Points
 
