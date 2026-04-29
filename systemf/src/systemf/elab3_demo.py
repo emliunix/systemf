@@ -45,12 +45,9 @@ async def main() -> None:
 
     # === e2e evaluation ===
 
-    session = ctx.new_session()
-    session.add_import(ImportDecl("demo", False, None, None, None))
-
     print("\n\n=== e2e evaluation ===\n")
 
-    async def check(expr: str, expected_val: Val, msg: str | None = None):
+    async def check(session, expr: str, expected_val: Val, msg: str | None = None):
         match await session.eval(expr):
             case (val, ty):
                 assert val == expected_val, f"for {expr}: expected {expected_val}, got {val}"
@@ -62,51 +59,82 @@ async def main() -> None:
             case _:
                 assert False, f"for {expr}: eval returned unexpected result"
 
-    await check("1", VLit(LitInt(1)))
-    await check("True", VData(0, []))
-    await check("id 42", VLit(LitInt(42)))
-    await check("1 + 2", VLit(LitInt(3)))
-    await check("const 1 2", VLit(LitInt(1)))
-    await check("not True", VData(1, []))
-    await check("not False", VData(0, []))
-    await check("compose (\\x -> x + 1) (\\x -> x * 2) 3", VLit(LitInt(7)))
-    await check("twice (\\x -> x + 1) 0", VLit(LitInt(2)))
-    await check('greet "world"', VLit(LitString("hello world")))
-    await check('greet "there"', VLit(LitString("hello there")))
-    await check("even 4", VData(0, []))
-    await check("even 3", VData(1, []))
-    await check("odd 3", VData(0, []))
-    await check("odd 4", VData(1, []))
-    await check("testConstMono", VLit(LitInt(1)))
-    await check("fromMaybe 0 (Just 42)", VLit(LitInt(42)))
-    await check("fromMaybe 0 Nothing", VLit(LitInt(0)))
+    builtins_session = ctx.new_session()
+
+    print("  --- Builtins ---")
+    await check(builtins_session, "1", VLit(LitInt(1)))
+    await check(builtins_session, "True", VData(0, []))
+    await check(builtins_session, "id 42", VLit(LitInt(42)))
+    await check(builtins_session, "1 + 2", VLit(LitInt(3)))
+    await check(builtins_session, "const 1 2", VLit(LitInt(1)))
+    await check(builtins_session, "compose (\\x -> x + 1) (\\x -> x * 2) 3", VLit(LitInt(7)))
+    await check(builtins_session, "fromMaybe 0 (Just 42)", VLit(LitInt(42)))
+    await check(builtins_session, "fromMaybe 0 Nothing", VLit(LitInt(0)))
+    await check(builtins_session, "length Nil", VLit(LitInt(0)))
+    await check(builtins_session, "length (Cons 1 (Cons 2 Nil))", VLit(LitInt(2)))
+    await check(builtins_session, "isEmpty Nil", VData(0, []))
+    await check(builtins_session, "isEmpty (Cons 1 Nil)", VData(1, []))
+    await check(
+        builtins_session,
+        "append (Cons 1 Nil) (Cons 2 Nil)",
+        VData(1, [VLit(LitInt(1)), VData(1, [VLit(LitInt(2)), VData(0, [])])]),
+    )
+    await check(
+        builtins_session,
+        "map (\\x -> x + 1) (Cons 1 (Cons 2 Nil))",
+        VData(1, [VLit(LitInt(2)), VData(1, [VLit(LitInt(3)), VData(0, [])])]),
+    )
+    await check(
+        builtins_session,
+        "foldl (\\acc x -> acc + x) 0 (Cons 1 (Cons 2 (Cons 3 Nil)))",
+        VLit(LitInt(6)),
+    )
+
+    session = ctx.new_session()
+    session.add_import(ImportDecl("demo", False, None, None, None))
+
+    print("\n  --- Demo ---")
+    await check(session, "not True", VData(1, []))
+    await check(session, "not False", VData(0, []))
+    await check(session, "twice (\\x -> x + 1) 0", VLit(LitInt(2)))
+    await check(session, 'greet "world"', VLit(LitString("hello world")))
+    await check(session, 'greet "there"', VLit(LitString("hello there")))
+    await check(session, "even 4", VData(0, []))
+    await check(session, "even 3", VData(1, []))
+    await check(session, "odd 3", VData(0, []))
+    await check(session, "odd 4", VData(1, []))
+    await check(session, "testConstMono", VLit(LitInt(1)))
 
     # Ref tests
     print("\n  --- Ref ---")
-    await check("get_ref (mk_ref 0)", VLit(LitInt(0)))
-    await check("let r = mk_ref 0 in let _ = set_ref r 42 in get_ref r", VLit(LitInt(42)))
-    await check("let r = mk_ref 0 in let _ = set_ref r 1 in let _ = set_ref r 2 in get_ref r", VLit(LitInt(2)))
+    await check(builtins_session, "get_ref (mk_ref 0)", VLit(LitInt(0)))
+    await check(builtins_session, "let r = mk_ref 0 in let _ = set_ref r 42 in get_ref r", VLit(LitInt(42)))
+    await check(builtins_session, "let r = mk_ref 0 in let _ = set_ref r 1 in let _ = set_ref r 2 in get_ref r", VLit(LitInt(2)))
 
     # Ref (Maybe a) — nullable ref
     print("\n  --- Ref (Maybe a) ---")
-    await check("get_ref (mk_ref Nothing)", VData(0, []),
+    await check(builtins_session, "get_ref (mk_ref Nothing)", VData(0, []),
           "nullable ref starts as Nothing")
     await check(
+        builtins_session,
         "let r = mk_ref Nothing in let _ = set_ref r (Just 42) in get_ref r",
         VData(1, [VLit(LitInt(42))]),
         "set nullable ref to Just 42",
     )
     await check(
+        builtins_session,
         "let r = mk_ref (Just 1) in let _ = set_ref r Nothing in get_ref r",
         VData(0, []),
         "clear a set ref back to Nothing",
     )
     await check(
+        builtins_session,
         "let r = mk_ref Nothing in let _ = set_ref r (Just 10) in fromMaybe 0 (get_ref r)",
         VLit(LitInt(10)),
         "fromMaybe on a Just ref",
     )
     await check(
+        builtins_session,
         "let r = mk_ref Nothing in fromMaybe 0 (get_ref r)",
         VLit(LitInt(0)),
         "fromMaybe on a Nothing ref",
@@ -114,51 +142,39 @@ async def main() -> None:
 
     # Factorial
     print("\n  --- Factorial ---")
-    await check("factorial 0", VLit(LitInt(1)))
-    await check("factorial 5", VLit(LitInt(120)))
+    await check(session, "factorial 0", VLit(LitInt(1)))
+    await check(session, "factorial 5", VLit(LitInt(120)))
 
-    # List
-    print("\n  --- List ---")
-    await check("length Nil", VLit(LitInt(0)))
-    await check("length (Cons 1 (Cons 2 Nil))", VLit(LitInt(2)))
-    await check("isEmpty Nil", VData(0, []))
-    await check("isEmpty (Cons 1 Nil)", VData(1, []))
-    await check("head (Cons 42 Nil)", VLit(LitInt(42)))
-    await check(
-        "append (Cons 1 Nil) (Cons 2 Nil)",
-        VData(1, [VLit(LitInt(1)), VData(1, [VLit(LitInt(2)), VData(0, [])])]),
-    )
-    await check(
-        "map (\\x -> x + 1) (Cons 1 (Cons 2 Nil))",
-        VData(1, [VLit(LitInt(2)), VData(1, [VLit(LitInt(3)), VData(0, [])])]),
-    )
-    await check(
-        "foldl (\\acc x -> acc + x) 0 (Cons 1 (Cons 2 (Cons 3 Nil)))",
-        VLit(LitInt(6)),
-    )
+    # Demo-only list helper
+    print("\n  --- Demo List ---")
+    await check(session, "head (Cons 42 Nil)", VLit(LitInt(42)))
 
     # Either
     print("\n  --- Either ---")
-    await check("fromLeft 0 (Left 42)", VLit(LitInt(42)))
-    await check("fromLeft 0 (Right True)", VLit(LitInt(0)))
+    await check(session, "fromLeft 0 (Left 42)", VLit(LitInt(42)))
+    await check(session, "fromLeft 0 (Right True)", VLit(LitInt(0)))
     await check(
+        session,
         "either (\\x -> x + 1) (\\y -> 0) (Left 5)",
         VLit(LitInt(6)),
     )
     await check(
+        session,
         "either (\\x -> x + 1) (\\y -> 0) (Right True)",
         VLit(LitInt(0)),
     )
 
     # Tree
     print("\n  --- Tree ---")
-    await check("treeSize (Leaf 1)", VLit(LitInt(1)))
-    await check("treeSize (Node (Leaf 1) 2 (Leaf 3))", VLit(LitInt(3)))
+    await check(session, "treeSize (Leaf 1)", VLit(LitInt(1)))
+    await check(session, "treeSize (Node (Leaf 1) 2 (Leaf 3))", VLit(LitInt(3)))
     await check(
+        session,
         "treeToList (Leaf 1)",
         VData(1, [VLit(LitInt(1)), VData(0, [])]),
     )
     await check(
+        session,
         "treeToList (Node (Leaf 1) 2 (Leaf 3))",
         VData(1, [  # Cons
             VLit(LitInt(1)),

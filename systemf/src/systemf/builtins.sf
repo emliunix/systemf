@@ -27,6 +27,37 @@ mapMaybe :: forall a b. (a -> b) -> Maybe a -> Maybe b = \f ma ->
     Nothing -> Nothing
     Just x -> Just (f x)
 
+-- Prelude-style helpers
+id :: forall a. a -> a = \x -> x
+
+const :: forall a b. a -> b -> a = \x y -> x
+
+compose :: forall a b c. (b -> c) -> (a -> b) -> a -> c = \f g x -> f (g x)
+
+foldr :: forall a b. (a -> b -> b) -> b -> List a -> b = \f acc xs ->
+  case xs of
+    Nil -> acc
+    Cons x xs' -> f x (foldr f acc xs')
+
+foldl :: forall a b. (b -> a -> b) -> b -> List a -> b = \f acc xs ->
+  case xs of
+    Nil -> acc
+    Cons x xs' -> foldl f (f acc x) xs'
+
+map :: forall a b. (a -> b) -> List a -> List b = \f xs ->
+  foldr (\x acc -> Cons (f x) acc) Nil xs
+
+isEmpty :: forall a. List a -> Bool = \xs ->
+  case xs of
+    Nil -> True
+    Cons _ _ -> False
+
+length :: forall a. List a -> Int = \xs ->
+  foldl (\acc _ -> acc + 1) 0 xs
+
+append :: forall a. List a -> List a -> List a = \xs ys ->
+  foldr Cons ys xs
+
 -- Integer primitives
 prim_op int_plus     :: Int -> Int -> Int
 prim_op int_minus    :: Int -> Int -> Int
