@@ -1,7 +1,7 @@
 # SystemF Elab3 - Project Status
 
-**Last Updated:** 2026-04-29
-**Test Count:** 366 elab3 tests + 304 surface tests = 670 total
+**Last Updated:** 2026-04-30
+**Test Count:** 364 elab3 tests + 302 surface tests = 666 total
 
 ## Overview
 
@@ -34,6 +34,9 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 - **Test migration**: All elab2 tests migrated to elab3
 - **SurfacePrimTypeDecl docstring support**: Parser supports docstrings attached to type args
 - **LLM Agent Synthesizer**: Implemented under `bub_sf/bub_ext`
+- **Surface unit/list syntax**: Added syntax-shaped surface nodes and parser support for `()`, `[]`, `[a, b]`, `() ->`, `[T]`, `() -> case`, and list/unit patterns
+- **Pattern AST cleanup**: Parser now emits `SurfacePatternSeq` for flat pattern sequences and keeps singleton patterns atomic (`SurfaceVarPattern`, `SurfaceUnitPattern`, `SurfaceListPattern`, etc.)
+- **Rename + e2e coverage for new syntax**: `rename_expr.py` updated for new surface nodes; `elab3_demo.py` covers unit/list literals, empty list syntax, nested list syntax, unit/list tuple syntax, and empty list patterns
 
 ## Next Steps
 
@@ -41,14 +44,12 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 2. **More Built-in Types**: `Array`, `Map`, `IO`
 3. **Error Handling**: Better typechecker/evaluator error messages
 4. **Performance**: Profile evaluator for larger programs
-5. **List literal syntax**: Support `[1, 2, 3]` sugar for list construction
-6. **Unit literal syntax**: Support `()` as shorthand for `MkUnit`
-7. **Documentation**: User-facing surface language syntax docs
-8. **Ambiguous variable resolution not reported in source files** `#issue`: When a name resolves to multiple candidates (e.g., imported from multiple modules), the renamer currently accepts the first match silently. This is correct behavior for the REPL (where shadowing is allowed), but should be a hard error when loading source code files.
-9. **`:info map` doesn't work with builtins imported** `#issue`: Even after importing builtins into the REPL environment, `:info map` fails to resolve or display information for builtin names. The `:info` command should consult the same imported/builtin namespace that expression lookup uses.
-10. **Generalization produces unreadable skolem names** `#issue`: Skolem type variables are printed as `$a1234`, which is hard to recognize. Should pick a human-readable representative name (e.g., from the original bound variable) during generalization.
-11. **Add e2e coverage for non-exhaustive pattern failures**: The `matchc.py` audit passed: fallible matches are threaded correctly and `typecheck_expr.py` supplies the runtime error handler. We still need an end-to-end test that exercises an actual non-exhaustive `case` or lambda pattern and checks for the `Non-exhaustive patterns` runtime error.
-12. **Pretty-print `:info` output**: `:info <name>` currently includes the raw internal `Name(...)` representation before the type. It should use a user-facing pretty-printer so REPL introspection output matches the rest of the interface.
+5. **Documentation**: User-facing surface language syntax docs
+6. **Ambiguous variable resolution not reported in source files** `#issue`: When a name resolves to multiple candidates (e.g., imported from multiple modules), the renamer currently accepts the first match silently. This is correct behavior for the REPL (where shadowing is allowed), but should be a hard error when loading source code files.
+7. **`:info map` doesn't work with builtins imported** `#issue`: Even after importing builtins into the REPL environment, `:info map` fails to resolve or display information for builtin names. The `:info` command should consult the same imported/builtin namespace that expression lookup uses.
+8. **Generalization produces unreadable skolem names** `#issue`: Skolem type variables are printed as `$a1234`, which is hard to recognize. Should pick a human-readable representative name (e.g., from the original bound variable) during generalization.
+9. **Add e2e coverage for non-exhaustive pattern failures**: The `matchc.py` audit passed: fallible matches are threaded correctly and `typecheck_expr.py` supplies the runtime error handler. We still need an end-to-end test that exercises an actual non-exhaustive `case` or lambda pattern and checks for the `Non-exhaustive patterns` runtime error.
+10. **Pretty-print `:info` output**: `:info <name>` currently includes the raw internal `Name(...)` representation before the type. It should use a user-facing pretty-printer so REPL introspection output matches the rest of the interface.
 
 ## Entry Points
 
