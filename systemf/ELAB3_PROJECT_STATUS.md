@@ -39,6 +39,7 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 - **Rename + e2e coverage for new syntax**: `rename_expr.py` updated for new surface nodes; `elab3_demo.py` covers unit/list literals, empty list syntax, nested list syntax, unit/list tuple syntax, and empty list patterns
 - **REPL `:info` fixes**: `:info` now resolves builtins from the imported/builtin namespace and pretty-prints user-facing output instead of raw internal `Name(...)` values
 - **Non-exhaustive pattern e2e coverage**: Added end-to-end coverage for runtime `Non-exhaustive patterns` failures
+- **PP `{!r}` not accurate** repr converts string to single quoted `'Hello'`. Does not align with the syntax of systemf. Fixed by using `json.dumps` for string literals.
 
 ## Next Steps
 
@@ -49,6 +50,9 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 5. **Documentation**: User-facing surface language syntax docs
 6. **Ambiguous variable resolution not reported in source files** `#issue`: When a name resolves to multiple candidates (e.g., imported from multiple modules), the renamer currently accepts the first match silently. This is correct behavior for the REPL (where shadowing is allowed), but should be a hard error when loading source code files.
 7. **Generalization produces unreadable skolem names** `#issue`: Skolem type variables are printed as `$a1234`, which is hard to recognize. Should pick a human-readable representative name (e.g., from the original bound variable) during generalization.
+8. **Lazy `\&\&`/`||` syntax** `#issue`: `bool_and` and `bool_or` eagerly evaluate both arguments. Need special AST nodes or desugaring to `if`-then-else so that `\&\&` and `||` short-circuit (lazy) as in most languages.
+9. **Pretty-print builtin types with special syntax** `#issue`: The pretty printer still outputs raw constructors (e.g., `Cons 1 Cons 2 Nil :: List Int`, `MkUnit :: Unit`, `MkPair 1 2 :: Pair Int Int`). Should detect these builtins and emit surface syntax: `[1, 2] :: [Int]`, `() :: ()`, `(1, 2) :: (Int, Int)`.
+
 
 ## Entry Points
 

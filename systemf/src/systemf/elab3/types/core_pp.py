@@ -48,7 +48,7 @@ def _pp(tm: CoreTm, depth: int, width: int) -> list[str]:
 
     match tm:
         case CoreLit(value):
-            return [f"{ind}{value.v!r}"]
+            return [f"{ind}{value!r}"]
 
         case CoreVar(id) | CoreGlobalVar(id):
             return [f"{ind}{id.name.surface}"]

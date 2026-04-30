@@ -26,4 +26,3 @@ extraPaths = [
   "systemf/src/",
   "bub/src/",
 ]
-stubPath = "systemf/typings/"

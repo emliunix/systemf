@@ -101,6 +101,7 @@ BUILTIN_BIN_OPS = {
     "&&": BUILTIN_BOOL_AND,
     "||": BUILTIN_BOOL_OR,
     "++": BUILTIN_STRING_CONCAT,
+    ":": BUILTIN_LIST_CONS,
 }
 
 

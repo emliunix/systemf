@@ -1,7 +1,7 @@
 """Tests for REPL command parser."""
 
 import pytest
-from systemf.elab3.reader_env import ImportSpec
+from systemf.elab3.types.ast import ImportDecl
 from systemf.elab3.repl_parser import (
     parse_lines,
     REPLParseError,
@@ -64,13 +64,13 @@ class TestInfo:
 
 class TestImport:
     def test_simple(self):
-        assert parse_one(":import builtins") == Import(ImportSpec("builtins", alias=None, is_qual=False))
+        assert parse_one(":import builtins") == Import(ImportDecl("builtins", qualified=False, alias=None))
 
     def test_qualified(self):
-        assert parse_one(":import qualified builtins") == Import(ImportSpec("builtins", alias=None, is_qual=True))
+        assert parse_one(":import qualified builtins") == Import(ImportDecl("builtins", qualified=True, alias=None))
 
     def test_aliased(self):
-        assert parse_one(":import builtins as B") == Import(ImportSpec("builtins", alias="B", is_qual=False))
+        assert parse_one(":import builtins as B") == Import(ImportDecl("builtins", qualified=False, alias="B"))
 
     def test_no_args_raises(self):
         with pytest.raises(REPLParseError, match="requires an argument"):

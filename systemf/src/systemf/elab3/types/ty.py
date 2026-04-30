@@ -14,6 +14,7 @@ from __future__ import annotations
 from abc import ABC
 from collections.abc import Generator
 from dataclasses import dataclass, field
+import json
 from typing import Any, Generic, TypeVar, override
 
 from systemf.utils.location import Location
@@ -199,7 +200,7 @@ class TyForall(Ty):
 
 class Lit(ABC):
     """Base for runtime literal values."""
-    
+
     @property
     def ty(self) -> Ty: ...
 
@@ -216,11 +217,15 @@ class LitInt(Lit):
     @override
     def ty(self) -> Ty:
         return TyInt()
-    
+
     @property
     @override
     def v(self) -> Any:
         return self.value
+
+    @override
+    def __repr__(self) -> str:
+        return self.value.__repr__()
 
 
 @dataclass(frozen=True)
@@ -232,11 +237,15 @@ class LitString(Lit):
     @override
     def ty(self) -> Ty:
         return TyString()
-    
+
     @property
     @override
     def v(self) -> Any:
         return self.value
+
+    @override
+    def __repr__(self) -> str:
+        return json.dumps(self.value)
 
 
 # =============================================================================

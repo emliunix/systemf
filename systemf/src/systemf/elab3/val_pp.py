@@ -16,7 +16,7 @@ def pp_val(ctx: TyLookup, val: Val, ty: Ty) -> str:
                 vals_str = " ".join(_pp(arg, ty) for ty, arg in zip(dcon_field_tys, args))
                 return f"{dcon.name.surface} {vals_str}".strip()
             case VLit(lit=lit), _:
-                return f"{lit.v!r}"
+                return f"{lit!r}"
             case VPartial(name=name, arity=arity), _:
                 return f"<func {name} {arity}>"
             case VClosure(), _:
