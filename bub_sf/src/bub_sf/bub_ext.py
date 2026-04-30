@@ -1,8 +1,8 @@
-from collections.abc import Generator
-from typing import Any, cast, override
-from os import path
 import uuid
 
+from os import path
+from typing import Any, cast, override
+from collections.abc import Generator
 
 from bub.builtin.agent import Agent
 from bub.framework import BubFramework
@@ -31,8 +31,24 @@ class BubExt(Ext):
         return [path.basename(__file__)]
 
     @override
-    def synthesizer(self) -> dict[str, Synthesizer] | Synthesizer | None:
-        return LLMOps()
+    def synthesizers(self) -> list[dict[str, Synthesizer] | Synthesizer] | None:
+        return [
+            { "bub": BubOps() },
+            LLMOps()
+        ]
+
+
+class BubOps(Synthesizer):
+    @override
+    def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None:
+        arg_tys, res_ty = split_fun(thing.id.ty)
+
+        def _error(vals: list[Val]) -> Val:
+            raise Exception("not implemented")
+
+        match name.surface:
+            case _:
+                return VPartial.create(name.surface, len(arg_tys), _error)
 
 
 class LLMOps(Synthesizer):
@@ -43,7 +59,7 @@ class LLMOps(Synthesizer):
             return None
 
         arg_tys, res_ty = split_fun(thing.id.ty)
-        
+
         async def _fun(args: list[Val]) -> Val:
             s2 = session.fork()
             s2.state.update({
@@ -58,8 +74,8 @@ class LLMOps(Synthesizer):
             s2.add_return(res, res_ty)
 
             args_lines = [
-                f"- arg{i} = {pp_val(s2, arg, arg_ty)}" 
-                for i, (arg, arg_ty) in enumerate(zip(args, arg_tys))
+                f"- arg{i} :: {arg_ty}"
+                for i, arg_ty in enumerate(arg_tys)
             ]
             prompt = f"""
 You are inside a LLM function ({name.surface}) call with a REPL session.
@@ -74,13 +90,13 @@ The following arguments and set_return function available in the context:
 {'\n'.join(args_lines)}\n
 - set_return :: {res_ty} -> Unit
 
-Call sf_eval("set_return <value>") to conclude your work and return a value. 
+Call sf.repl("arg<i>") to check the argument value and sf.repl("set_return <expr>") to conclude your work and return a value.
 
 You can use the REPL session to evaluate any System F code, including using built-in functions and data types.
 The REPL session has access to all previously defined modules and functions, as well as items defined by parent.
             """
 
-            await run_agent_with_repl(s2, prompt)
+            _ = await run_agent_with_repl(s2, prompt)
 
             # return captured value
             if res[0] is None:

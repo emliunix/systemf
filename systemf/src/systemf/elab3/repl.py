@@ -36,10 +36,10 @@ class REPL(REPLContext, Synthesizer):
     name_cache: NameCache
     exts: list[Ext]
     ops_synther: Synthesizer
-    
+
     modules: dict[str, Module]
     search_paths: list[str]
-    
+
     _loading: dict[str, str | None]
     _replmod_counter: int
 
@@ -50,22 +50,23 @@ class REPL(REPLContext, Synthesizer):
         self._loading = {}
         self._replmod_counter = 0
         self.exts = exts or []
-        
+
         mod_synths = {
             "builtins": cast(Synthesizer, PrimOpsSynth(_builtins_primops())),
         }
-        nonmod_synths = []
+        nonmod_synths: list[Synthesizer] = []
         paths = search_paths and search_paths[:] or []
         paths.extend([".", str(Path(__file__).parent.parent)])
         for ext in self.exts:
-            match ext.synthesizer():
-                case dict() as synths:
-                    mod_synths.update(synths)
-                case Synthesizer() as synth:
-                    nonmod_synths.append(synth)
+            for synth in ext.synthesizers() or []:
+                match synth:
+                    case dict() as synths:
+                        mod_synths.update(synths)
+                    case Synthesizer() as synth:
+                        nonmod_synths.append(synth)
             if len(ext_paths := ext.search_paths()) > 0:
                 paths.extend(ext_paths)
-        
+
         # first in ext takes precedence
         nonmod_synth = functools.reduce(lambda a, curr: SynthChain(curr, a), reversed(nonmod_synths), None)
         self.ops_synther = SynthRouter(mod_synths, nonmod_synth)
