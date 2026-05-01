@@ -1,709 +1,299 @@
 # ForkTapeStore Core Design
 
-## Overview
+## Goal
 
-ForkTapeStore is a SQLite-backed append-only tape store that implements the `AsyncTapeStore` protocol from `republic`. It supports instant branching via copy-on-write semantics. A fork creates a new tape that shares history with its parent up to a specific point, then diverges independently.
+SQLite-backed append-only tape store implementing `AsyncTapeStore` protocol from `republic`.
 
-**Interface target:** `AsyncTapeStore` (async protocol). The store is accessed through `AsyncTapeStoreAdapter` which wraps the sync SQLite implementation.
-
-**Fork semantics:** This is a **persistent, metadata-only fork** — a permanent branch in the database, not a temporary runtime context. Forks survive process restarts and can be forked again. This is fundamentally different from Bub's `ForkTapeStore` which uses `contextvars` for temporary session-scoped forks that merge back on context exit.
-
-## Key Properties
-
-- **Instant fork**: O(1) metadata operation, no data copying
-- **Shared history**: Parent entries are read transparently through the child
-- **Monotonic entry IDs**: Merged view presents continuous, gap-free entry IDs
-- **Nested forks**: Forks can be forked, creating trees of arbitrary depth
-- **Physical snapshot**: Optional deep copy for independent lifecycle
-- **Persistent branches**: Forks are durable database records, not runtime context
+Key properties: instant fork (O(1) metadata), shared history via copy-on-write, gap-free merged entry IDs across fork chains.
 
 ## Principles
 
-### Core-Interface Split
+**Immutable entries.** Tape entries are never deleted or modified. Only `append` writes to `tape_entries`.
 
-The implementation is split into two layers with a single rule: **core operations maintain invariants; interface operations never bypass the core.**
+**Core-Interface split.** Core operations (`create`, `append`, `fork`) are the only code that writes to the database. Interface operations (`read`, `fetch_all`, `list_tapes`) are read-only. Core maintains invariants; interface consumes them.
 
-**Core operations** (`fork`, `snapshot`, `append`, `reset`) are the only code that writes to the database. Each core operation is responsible for maintaining all invariants (I1–I6) atomically. When any code calls only core operations, the database is always in a valid state.
+**Persistent forks.** Forks are database records, not runtime context. They survive process restarts and can be nested to arbitrary depth.
 
-**Interface operations** (`read`, `fetch_all`, `list_tapes`) are read-only or compositional. They may build complex queries on top of the core, but they never write to the database except by calling core operations. This means interface bugs can return wrong results, but they cannot corrupt data.
+## Source Reference
 
-This split makes the sync core (`SQLiteForkTapeStore`) the trust boundary. The async adapter (`AsyncTapeStoreAdapter`) and all query logic sit above it, consuming the core's guarantees without being able to violate them.
+| Type | Path |
+|------|------|
+| `TapeEntry` | `republic/src/republic/tape/entries.py` |
+| `TapeQuery` | `republic/src/republic/tape/query.py` |
+
+`ForkTapeStore` accepts `TapeEntry` instances with fields: `entry_id`, `kind`, `payload`, `meta`, `date`. The `entry_id` passed to `append` is ignored; the store assigns sequential IDs. (The entry object is not mutated to signal new_id. The caller discards it anyway and fetches entries back via `read`/`fetch_all`.)
 
 ## Schema
 
-### tapes Table
-
-Metadata for each tape, including fork relationships.
+### tapes
 
 ```sql
 CREATE TABLE tapes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
     parent_id INTEGER REFERENCES tapes(id),
-    parent_entry_id INTEGER,        -- Last shared entry in parent (fork point)
-    parents_cache TEXT,             -- JSON: [[tape_id, entry_id], ...] eagerly computed
-    next_entry_id INTEGER DEFAULT 0 -- Next entry ID assigned to new entry in the tape
+    parent_entry_id INTEGER,        -- fork point: last shared entry in parent
+    next_entry_id INTEGER DEFAULT 0 -- next assigned entry_id for this tape
 );
 ```
 
-Fields:
-- `id`: Internal surrogate key
-- `name`: Human-readable unique tape identifier
-- `parent_id`: NULL for root tapes; references parent tape for forks
-- `parent_entry_id`: The last entry ID inherited from parent. Forked tape's own entries start from `parent_entry_id + 1`.
-- `parents_cache`: Pre-computed JSON array of all ancestor fork points, eagerly maintained to avoid CTE recursion on hot paths. Format: `[[ancestor_id, fork_entry_id], ...]` ordered from root to immediate parent.
-- `next_entry_id`: Next entry ID to allocate. Starts at 0 for root tapes. After fork, starts at `parent_entry_id + 1`.
+`next_entry_id` starts at 0 for roots. After fork, starts at `parent_entry_id + 1`.
 
-### tape_entries Table
-
-Actual append-only entries. Entry IDs are scoped per tape.
+### tape_entries
 
 ```sql
 CREATE TABLE tape_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tape_id INTEGER NOT NULL REFERENCES tapes(id),
-    entry_id INTEGER NOT NULL,      -- Sequential within this tape
+    entry_id INTEGER NOT NULL,
     kind TEXT NOT NULL,
-    payload TEXT NOT NULL,          -- JSON (maps to republic TapeEntry.payload)
-    meta TEXT NOT NULL DEFAULT '{}',-- JSON (maps to republic TapeEntry.meta)
-    date TEXT NOT NULL              -- ISO timestamp (maps to republic TapeEntry.date)
+    payload TEXT NOT NULL,          -- JSON
+    meta TEXT NOT NULL DEFAULT '{}',-- JSON
+    date TEXT NOT NULL              -- ISO timestamp
 );
 
 CREATE INDEX idx_entries_tape_entry ON tape_entries(tape_id, entry_id);
 ```
 
-**Notes:**
-- Field names match republic's `TapeEntry` model directly: `payload`, `meta`, `date`.
-- There is no `anchor` column. Anchor metadata lives exclusively in the `anchors` table, populated when an entry with `kind="anchor"` is appended.
-- The `UNIQUE(tape_id, entry_id)` constraint on `tape_entries` is not enforced because entry IDs are guaranteed contiguous by I2 and enforced by application logic (using `next_entry_id` as the sole allocator).
+`entry_id` is scoped to the tape (not a global sequence). Guaranteed contiguous by allocation logic.
 
-### anchors Table
-
-**New in this design.** Extracted anchor metadata for O(log N) anchor resolution.
+### anchors
 
 ```sql
 CREATE TABLE anchors (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tape_id INTEGER NOT NULL REFERENCES tapes(id),
-    entry_id INTEGER NOT NULL,      -- Matches tape_entries.entry_id
+    entry_id INTEGER NOT NULL,
     anchor_name TEXT NOT NULL,
-    UNIQUE(tape_id, anchor_name),   -- No duplicate names within a tape
-    UNIQUE(tape_id, entry_id)       -- One anchor per entry max
+    UNIQUE(tape_id, anchor_name),   -- catches duplicates within same tape
+    UNIQUE(tape_id, entry_id)
 );
 
 CREATE INDEX idx_anchors_lookup ON anchors(tape_id, anchor_name);
 CREATE INDEX idx_anchors_entry ON anchors(tape_id, entry_id);
 ```
 
-**Rationale:** The `anchors` table separates anchor metadata from entry content, enabling indexed lookups for the most common query pattern (`after_anchor`). Without this table, `after_anchor` queries require O(N) linear scan in Python.
+Curated key-field extraction for O(log N) anchor resolution. Populated from `kind="anchor"` entries during `append`. No anchor copying on fork — child resolves parent anchors via ancestor CTE.
 
-**Key design decisions:**
-- **Populated from `kind="anchor"` entries**: When `append` receives an entry with `kind="anchor"`, it extracts `payload["name"]` and writes a row to `anchors`. No separate anchor field on `tape_entries` is needed.
-- **Foreign key to tapes, not tape_entries**: Anchors reference `tapes(id)` because the natural query key is `(tape_id, anchor_name)`. A foreign key to `tape_entries` would require a composite key or surrogate `id` lookup, adding indirection without benefit.
-- **UNIQUE(tape_id, anchor_name)**: Prevents duplicate anchor names within a tape. Attempting to append a second anchor entry with the same name fails with an integrity error.
-- **UNIQUE(tape_id, entry_id)**: Enforces one anchor per entry, consistent with anchors being a distinct entry kind.
-- **No anchor copying on fork**: Forked tapes do NOT copy parent anchors into their own `anchors` table. Anchor resolution walks the ancestor chain via CTE (see [Query: after_anchor for Forked Tapes](#query-after_anchor-for-forked-tapes)). This avoids write amplification and keeps fork O(1).
-- **Anchor shadowing**: If a child tape defines an anchor with the same name as a parent anchor, the child's anchor takes precedence during resolution. The CTE resolves leaf-first (depth ascending), so the closest definition wins.
+`UNIQUE(tape_id, anchor_name)` catches same-tape duplicates, but the merged-view uniqueness (I5) requires a code check against ancestors.
 
-## Entry ID Semantics
+### Views
 
-### Within a Single Tape
+Views encapsulate the recursive CTE logic, keeping queries in `fetch_all` and `read` declarative.
 
-Entry IDs are monotonically increasing integers starting from 0 for root tapes:
-
-```
-Root tape "main":
-  entry_id: 0, 1, 2, 3, 4, 5, ...
-  next_entry_id: 6
-```
-
-### Fork Point
-
-When forking at entry ID `N`, the child tape:
-- Inherits entries `0..N` from parent (shared)
-- Starts its own entries at `N + 1`
-- `parent_entry_id = N`
-- `next_entry_id = N + 1` initially
-
-```
-Parent "main" (next_entry_id = 6):
-  entry_id: 0, 1, 2, 3, 4, 5
-
-Fork "main-fork" at entry_id = 3:
-  parent_entry_id = 3
-  next_entry_id = 4
-  Own entries: 4, 5, 6, ...
-  
-Merged view of "main-fork":
-  entry_id: 0, 1, 2, 3 (from parent), 4, 5, 6 (own)
-```
-
-### Monotonic Merged View
-
-When reading a forked tape, the merged view presents a continuous sequence without gaps:
-
-```
-Root "main":
-  0: system
-  1: message "hello"
-  2: message "world"
-  3: handoff "phase1"
-
-Fork "main-v2" at entry_id = 1:
-  parent_entry_id = 1
-  Merged view:
-    0: system
-    1: message "hello"
-    2: message (own) "new direction"
-    3: message (own) "continuing"
-```
-
-The entry IDs in the merged view are gap-free and monotonically increasing, making them suitable for offset-based addressing (e.g., "fork from offset 5").
-
-## Invariants
-
-These invariants must hold at all times. Each operation is responsible for maintaining them.
-
-### I1 — next_entry_id equals own physical entry count
-
-For every tape T:
-
-```
-T.next_entry_id = |{ e in tape_entries | e.tape_id = T.id }|
-```
-
-- Root tapes start at 0.
-- A fresh fork starts at `parent_entry_id + 1` (zero own entries initially).
-- `append` is the only operation that increments it; `reset` sets it back to 0.
-
-### I2 — Own entry_ids form a contiguous range
-
-For tape T with `next_entry_id = K`:
-
-- Root tape: own `entry_id` values are exactly `{0, 1, …, K-1}`.
-- Fork tape with `parent_entry_id = N`: own `entry_id` values are exactly `{N+1, N+2, …, N+K-1}` where K counts own rows.
-
-Consequence: the merged view `[0..N]` (from parent) + `[N+1..]` (own) is always gap-free.
-
-### I3 — Fork entry_id ranges do not overlap with the inherited range
-
-For fork tape F with `parent_entry_id = N`:
-
-- The merged view of F uses the parent's entries **only up to and including** `entry_id = N`.
-- F's own physical entries start at `N+1`.
-- Even if the parent tape later appends entries with `entry_id > N`, those are invisible in F's merged view.
-
-This is enforced by the CTE query's `e.entry_id <= ta.parent_entry_id` filter on ancestor rows.
-
-### I4 — parents_cache is the complete, ordered ancestor chain
-
-For any tape C with immediate parent P:
-
-```
-C.parents_cache = P.parents_cache + [[P.id, C.parent_entry_id]]
-```
-
-Root tapes have `parents_cache = NULL` (equivalent to `[]`).
-
-This is a denormalized mirror of the recursive `parent_id` chain. It must be computed and stored atomically at fork time. It is never modified after creation.
-
-### I5 — anchors table is consistent with kind="anchor" entries
-
-For every tape T, the `anchors` table must be kept in sync with `tape_entries` rows of `kind="anchor"`:
-
-- **Forward**: every row in `anchors` with `tape_id = T.id` has a corresponding `tape_entries` row with the same `(tape_id, entry_id)` and `kind = "anchor"` and `payload["name"] = anchor_name`.
-- **Reverse**: every `tape_entries` row with `tape_id = T.id` and `kind = "anchor"` has a corresponding row in `anchors` with `anchor_name = payload["name"]`.
-
-Operations responsible:
-- `append` with `entry.kind == "anchor"`: dual-write — INSERT into `tape_entries` and INSERT into `anchors` with `anchor_name = entry.payload["name"]`, atomically in one transaction.
-- `reset`: must delete from both `tape_entries` and `anchors`.
-- `snapshot`: must copy `tape_entries` rows (full merged view) and their corresponding `anchors` rows.
-- `fork`: no anchor copy needed — parent anchors remain accessible via CTE traversal.
-
-### I6 — Anchor names are unique within a tape's own rows
-
-`(tape_id, anchor_name)` is UNIQUE in `anchors`. A tape may use the same anchor name as an ancestor (shadowing), but within one tape's own physical rows a name appears at most once. Enforced by the UNIQUE constraint; `append` raises an integrity error on violation.
-
-### Operation × Invariant responsibility
-
-| Operation | I1 | I2 | I3 | I4 | I5 | I6 |
-|-----------|----|----|----|----|----|----|
-| `append` | +1 to `next_entry_id` | extends range by 1 | unaffected | unaffected | dual-write if kind="anchor" | UNIQUE constraint |
-| `fork` | sets child initial value | sets child start to N+1 | enforced by fork_point choice | must compute & store chain | no copy needed | unaffected |
-| `snapshot` | copies from merged view | physical copy, contiguous from 0 | n/a (new root) | sets to NULL | must copy full anchor set | inherits uniqueness |
-| `reset` | sets to 0 | deletes all own rows | unaffected | unaffected | must delete anchor rows | unaffected |
-
-## Query: Read Merged Tape (CTE Version)
-
-Read all entries from a tape, including inherited parent entries up to each fork point.
+**Critical:** The CTE must propagate the immediate child's fork point at each level, not inherit from the leaf. A subquery looks up the child's `parent_entry_id` from the database at each recursion step.
 
 ```sql
-WITH RECURSIVE tape_ancestors(tape_id, parent_id, parent_entry_id, depth) AS (
-    -- Start with the target tape
-    SELECT id, parent_id, parent_entry_id, 0
-    FROM tapes
-    WHERE name = ?
-    
+-- Ancestor chain for every tape (root to leaf, depth ascending)
+-- leaf_id: the tape you query (add WHERE leaf_id = ? condition)
+-- tape_id: changes as we walk up ancestors (root, ..., parent, leaf)
+-- fork_point: the entry where the child forked from this ancestor
+CREATE VIEW tape_ancestors AS
+WITH RECURSIVE chain(leaf_id, tape_id, parent_id, fork_point, depth) AS (
+    SELECT id, id, parent_id, parent_entry_id, 0 FROM tapes
     UNION ALL
-    
-    -- Recurse into parent
-    SELECT t.id, t.parent_id, t.parent_entry_id, a.depth + 1
+    SELECT c.leaf_id, t.id, t.parent_id,
+           (SELECT parent_entry_id FROM tapes WHERE id = c.tape_id),
+           c.depth + 1
     FROM tapes t
-    INNER JOIN tape_ancestors a ON t.id = a.parent_id
-    WHERE a.parent_id IS NOT NULL
+    INNER JOIN chain c ON t.id = c.parent_id
+    WHERE c.parent_id IS NOT NULL
 )
-SELECT 
+SELECT * FROM chain;
+
+-- Merged entries for every tape (includes inherited parent entries)
+CREATE VIEW merged_entries AS
+SELECT
+    a.leaf_id AS leaf_tape_id,
     e.entry_id,
     e.kind,
     e.payload,
     e.meta,
-    e.date
-FROM tape_ancestors ta
-LEFT JOIN tape_entries e ON e.tape_id = ta.tape_id
-WHERE 
-    -- Leaf tape (depth=0): include ALL its own entries
-    ta.depth = 0
-    OR
-    -- Ancestor tapes: only include entries UP TO the fork point
-    (ta.depth > 0 AND e.entry_id <= ta.parent_entry_id)
-ORDER BY ta.depth DESC, e.entry_id;
+    e.date,
+    a.depth,
+    a.fork_point
+FROM tape_ancestors a
+LEFT JOIN tape_entries e ON e.tape_id = a.tape_id
+WHERE a.depth = 0 OR e.entry_id <= a.fork_point;
+
+-- Merged anchors for every tape (includes inherited parent anchors)
+CREATE VIEW merged_anchors AS
+SELECT
+    a.leaf_id AS leaf_tape_id,
+    an.entry_id,
+    an.anchor_name,
+    a.depth
+FROM tape_ancestors a
+INNER JOIN anchors an ON an.tape_id = a.tape_id;
 ```
 
-Result ordering:
-- `ta.depth DESC` puts root tape first, leaf tape last
-- `e.entry_id ASC` within each tape level
-- Combined: continuous monotonic sequence from root to leaf
+**Why views:** They separate the recursive traversal (core schema concern) from the filtering (interface concern). Queries become simple `SELECT ... WHERE leaf_tape_id = ?` without repeating CTEs.
 
-## Query: after_anchor for Root Tapes
+**Performance note:** SQLite evaluates the recursive CTE in the view for all tapes, then filters by `leaf_tape_id`. For databases with many tapes, inline CTEs (scoped to one tape) may be faster. The view approach trades some performance for query simplicity. For typical workloads (hundreds of tapes, not millions), the difference is negligible.
 
-**New in this design.** For root tapes, `after_anchor` resolves in O(log N) via the `anchors` table index.
+**Correctness note:** The subquery `(SELECT parent_entry_id FROM tapes WHERE id = c.tape_id)` is critical for nested forks. Without it, the leaf's fork point propagates up the entire chain, causing root ancestors to show entries beyond their actual fork point.
 
-```sql
--- Step 1: Resolve anchor to entry_id (O(log N) via idx_anchors_lookup)
-SELECT entry_id 
-FROM anchors 
-WHERE tape_id = ? AND anchor_name = ?;
+## Invariants
 
--- Step 2: Fetch entries after that point (O(M) where M = result size)
-SELECT entry_id, kind, payload, meta, date
-FROM tape_entries
-WHERE tape_id = ? AND entry_id > ?
-ORDER BY entry_id;
-```
+### I1 — Sequential allocation
 
-**Performance:** O(log N + M) vs O(N) previously. The index lookup replaces the linear scan.
+For every tape T:
 
-## Query: after_anchor for Forked Tapes
+- `T.next_entry_id` is the next assigned `entry_id`
+- Own entries use IDs `{0, …, K-1}` for roots, `{N+1, …, N+K-1}` for forks (where `N = parent_entry_id`)
+- Allocation: `new_id = T.next_entry_id`; then `T.next_entry_id += 1` in the same transaction
+- `append` is the only operation that increments it
 
-**New in this design.** For forked tapes, anchor resolution walks the ancestor chain via CTE, then filters the merged view.
+Consequence: merged view is always gap-free.
 
-```sql
-WITH RECURSIVE 
--- Build ancestor chain from leaf to root
-tape_ancestors(tape_id, parent_id, parent_entry_id, depth) AS (
-    SELECT id, parent_id, parent_entry_id, 0
-    FROM tapes
-    WHERE name = ?
-    
-    UNION ALL
-    
-    SELECT t.id, t.parent_id, t.parent_entry_id, a.depth + 1
-    FROM tapes t
-    INNER JOIN tape_ancestors a ON t.id = a.parent_id
-    WHERE a.parent_id IS NOT NULL
-),
--- Resolve anchor: find leaf-most occurrence (child shadows parent)
-anchor_info(tape_id, entry_id, anchor_depth) AS (
-    SELECT a.tape_id, a.entry_id, ta.depth
-    FROM anchors a
-    INNER JOIN tape_ancestors ta ON a.tape_id = ta.tape_id
-    WHERE a.anchor_name = ?
-    ORDER BY ta.depth ASC          -- Leaf-first resolution
-    LIMIT 1
-)
-SELECT 
-    ROW_NUMBER() OVER (ORDER BY ta.depth DESC, e.entry_id ASC) - 1 as entry_id,
-    e.kind, e.payload, e.meta, e.date
-FROM tape_ancestors ta
-LEFT JOIN tape_entries e ON e.tape_id = ta.tape_id
-CROSS JOIN anchor_info ai
-WHERE 
-    -- Normal visibility constraints (same as merged view)
-    (ta.depth = 0 OR e.entry_id <= ta.parent_entry_id)
-    AND
-    -- Anchor-based filtering:
-    -- Descendants (after anchor in merged view): include all visible entries
-    (ta.depth < ai.anchor_depth
-     -- Anchor tape itself: only entries after the anchor point
-     OR (ta.depth = ai.anchor_depth AND e.entry_id > ai.entry_id))
-    -- Older ancestors (before anchor in merged view): implicitly excluded
-ORDER BY ta.depth DESC, e.entry_id ASC;
-```
+### I2 — Fork boundary
 
-**Semantics:**
-- The merged view orders entries by `depth DESC` (root first, leaf last).
-- An anchor in an ancestor tape at entry_id `X` means all entries from that tape with entry_id ≤ `X` come before the anchor in the merged view and are excluded.
-- All entries from descendant tapes come after the anchor in the merged view and are included.
-- If the anchor is in the leaf tape, only leaf entries after the anchor are returned.
+For fork tape F with `parent_entry_id = N`:
 
-**Example:**
-```
-Root tape:      [R0, R1(anchor="a1"), R2]
-Fork at R2 → Intermediate: [I3, I4]
-Fork at I4 → Leaf: [L5, L6]
+- F's merged view includes parent entries only up to `entry_id = N` (inclusive)
+- F's own entries start at `N+1`
+- Parent entries with `id > N` are invisible in F
 
-Merged view: [R0, R1, R2, I3, I4, L5, L6]
+Enforced by CTE filter `e.entry_id <= ta.fork_point` on ancestor rows.
 
-Query after_anchor="a1" on leaf:
-- Anchor resolved to root at entry_id=1, depth=2
-- Root (depth=2 = anchor_depth): include entry_id > 1 → [R2]
-- Intermediate (depth=1 < 2): include all → [I3, I4]
-- Leaf (depth=0 < 2): include all → [L5, L6]
-- Result: [R2, I3, I4, L5, L6]
-```
+### I3 — anchors table is consistent
 
-**Performance:** O(depth × log N + M) where `depth` = fork chain length, `N` = entries per tape, `M` = result size. The CTE recursion is O(depth) and the anchor lookup is O(log N) per tape in the chain due to the index.
+Every `kind="anchor"` entry has a corresponding `anchors` row with matching `(tape_id, entry_id, anchor_name = payload["name"])`, and vice versa.
 
-## Query: Read Merged Tape (Cached Version)
+This is maintained by `append` (dual-write) and queried by `fetch_all` for `after_anchor` resolution.
 
-> **Status:** Not yet implemented. The `parents_cache` column is eagerly maintained on fork, but all reads currently use the CTE recursive query above.
->
-> This is acceptable because CTE performance is sufficient (see benchmarks: ~4.5ms for 1700 entries across 3 levels). The cached read path is planned for future optimization if needed.
+### I4 — Anchor name uniqueness (merged view)
 
-For frequently-read tapes, a pre-computed `parents_cache` can avoid recursion:
+An anchor name may appear at most once in the entire merged view of any tape. This includes the tape's own anchors and all ancestor anchors visible through the fork chain.
 
-```sql
-WITH 
--- Parse parents_cache JSON into rows
-parent_chain(tape_id, entry_id, ord) AS (
-    SELECT 
-        json_extract(value, '$[0]'),
-        json_extract(value, '$[1]'),
-        key
-    FROM json_each(?)  -- parents_cache value
-),
--- Entries from ancestors (each up to their fork point)
-ancestor_entries(entry_id, kind, payload, meta, date, ord) AS (
-    SELECT e.entry_id, e.kind, e.payload, e.meta, e.date, p.ord
-    FROM tape_entries e
-    INNER JOIN parent_chain p ON e.tape_id = p.tape_id
-    WHERE e.entry_id <= p.entry_id
-),
--- Entries from leaf tape (all of them)
-leaf_entries(entry_id, kind, payload, meta, date, ord) AS (
-    SELECT entry_id, kind, payload, meta, date, 999999
-    FROM tape_entries
-    WHERE tape_id = ?
-)
-SELECT entry_id, kind, payload, meta, date
-FROM ancestor_entries
-UNION ALL
-SELECT entry_id, kind, payload, meta, date
-FROM leaf_entries
-ORDER BY ord, entry_id;
-```
+**Why:** `after_anchor` queries resolve by name. If multiple anchors share a name in the merged view, the query is ambiguous.
 
-This version would be O(1) complexity for the metadata lookup and O(N) for the entry scan, where N is the total visible entries.
+**Enforcement:** Application code in `append`, not a DB constraint. Before inserting an anchor, query `merged_anchors` view for the name. If found in any ancestor, raise `ValueError`.
 
-## Operations
+(Note: SQLite views cannot enforce uniqueness. The check must be in code.)
 
-### fork(source: str, name: str) → None
+## Core Operations
 
-Create a new tape that shares history with the source up to the current latest entry.
+Only these operations write to the database.
 
-**Algorithm:**
-1. Look up source tape by name
-2. `fork_point = source.next_entry_id - 1` (last entry before fork)
-3. Compute `parents_cache`:
-   - If source is root: `[[source.id, fork_point]]`
-   - If source is fork: append `[source.id, fork_point]` to source.parents_cache
-4. Insert new tape row with:
-   - `parent_id = source.id`
-   - `parent_entry_id = fork_point`
-   - `parents_cache = computed_chain`
-   - `next_entry_id = fork_point + 1`
+**NOTE:** Core operations do not commit transactions internally. The caller is responsible for transaction boundaries. This allows mixing multiple core operations (e.g., `append` + `fork`) in a single transaction for atomicity.
 
-**Anchor behavior on fork:**
-- No anchors are copied from parent to child.
-- The child's `anchors` table is empty initially.
-- Anchor resolution on the child walks the ancestor chain via CTE, so parent anchors remain resolvable.
-- This keeps fork O(1) — no additional INSERTs into `anchors`.
+### create(name: str) → None
 
-**Time complexity:** O(1) — single INSERT, no data copying
-**Space complexity:** O(1) — metadata only
+Create empty tape with `next_entry_id = 0`. No-op if tape exists.
 
-### snapshot(source: str, name: str) → None
+### append(tape: str, entry: TapeEntry) → int
 
-Create an independent physical copy of the source tape. The new tape has no parent.
-
-**Algorithm:**
-1. Create new root tape (`parent_id = NULL`)
-2. Copy all entries from source tape into new tape, preserving entry_ids
-3. Set `next_entry_id` on new tape to match source
-4. **Copy all anchors** from source to new tape (preserve `anchor_name` → `entry_id` mapping)
-
-**Time complexity:** O(N) where N = number of entries
-**Space complexity:** O(N)
-
-### append(tape_name: str, entry: TapeEntry) → int
-
-Append a new entry to a tape. Returns the assigned `entry_id`.
-
-**Algorithm:**
-1. Look up tape by name (create if it doesn't exist)
-2. Use `tape.next_entry_id` as the entry ID (the `id` field of the passed `TapeEntry` is ignored)
-3. Insert entry into `tape_entries` with auto-assigned `entry_id`
-4. **If `entry.kind == "anchor"`:**
+1. Get or create tape, read `next_entry_id`
+2. If `entry.kind == "anchor"`:
    - Extract `anchor_name = entry.payload["name"]`
-   - Insert into `anchors` table: `(tape_id, entry_id, anchor_name)`
-   - This is a dual write within the same transaction
-5. Increment `tape.next_entry_id`
+   - Query `merged_anchors` view for existing `anchor_name` (I4)
+   - If found, raise `ValueError`
+   - Insert into `anchors`
+3. Insert entry into `tape_entries` with assigned `entry_id = next_entry_id`
+4. Increment `next_entry_id`
 
-**Invariant:** If `entry.kind == "anchor"`, the `(tape_id, anchor_name)` pair must be unique. Duplicate anchor names within the same tape raise an integrity error.
+Returns assigned `entry_id`.
 
-**Returns:** The assigned `entry_id` (sequential integer starting from 0 for root tapes).
+(Caller must commit the transaction.)
 
-**Invariant:** `entry_id` is always sequential and gap-free within the tape's own entries.
+### fork(source: str, entry_id: int, name: str) → None
+
+Fork source tape at the given entry. The child tape shares all entries up to and including `entry_id`.
+
+**Precondition:** `entry_id` must be a valid entry in the source tape (i.e., `entry_id < source.next_entry_id`).
+
+1. Look up source tape
+2. Validate: `entry_id < source.next_entry_id`
+3. `fork_point = entry_id`
+4. Insert new tape: `parent_id = source.id`, `parent_entry_id = fork_point`, `next_entry_id = fork_point + 1`
+
+No data copying. No anchor copying. Fork is O(1).
+
+## Interface Operations
+
+Read-only. Never write to the database.
+
+### read(tape: str) → list[TapeEntry] | None
+
+Return all entries (merged view for forks). `None` if tape doesn't exist.
+
+Using views:
+```sql
+SELECT entry_id, kind, payload, meta, date
+FROM merged_entries
+WHERE leaf_tape_id = ?
+ORDER BY depth DESC, entry_id;
+```
 
 ### fetch_all(query: TapeQuery) → list[TapeEntry]
 
-**Interface operation.** Read entries from a tape, applying filters from the TapeQuery.
+Apply query filters on top of `read` or direct SQL.
 
-This is the primary query method exposed by the `AsyncTapeStore` protocol. It handles all query parameters:
-- `tape`: tape name (required)
-- `kinds`: filter by entry kind
-- `limit`: maximum results
-- `after_anchor`: entries after named anchor
+Supported filters:
+- `kinds` — filter by entry kind
+- `limit` — truncate result
+- `after_anchor` — entries after named anchor (O(log N) indexed)
 
-**Algorithm:**
-1. Resolve tape by name from `query.tape`
-2. If root tape: query `tape_entries` directly
-3. If fork: use CTE recursive query for merged view
-4. Apply additional filters (kinds, limit, after_anchor) from TapeQuery
-5. **If `after_anchor` is specified:**
-   - For root tapes: resolve via `anchors` table index (O(log N)), then filter
-   - For forked tapes: use the CTE-based anchor resolution query (see above)
-   - If anchor not found: return empty list
+Using views for `after_anchor` on forked tapes:
+```sql
+-- Resolve anchor (leaf-first)
+SELECT entry_id, depth
+FROM merged_anchors
+WHERE leaf_tape_id = ? AND anchor_name = ?
+ORDER BY depth ASC
+LIMIT 1;
 
-### read(tape_name: str) → list[TapeEntry] | None
+-- Fetch entries after anchor
+SELECT entry_id, kind, payload, meta, date
+FROM merged_entries
+WHERE leaf_tape_id = ?
+  AND (depth < ? OR (depth = ? AND entry_id > ?))
+ORDER BY depth DESC, entry_id;
+```
 
-**Interface operation.** Convenience method: return all entries for a tape (merged view).
+### list_tapes() → list[str]
 
-Equivalent to `fetch_all(TapeQuery(tape=tape_name))`.
+Return sorted tape names.
 
-### reset(tape_name: str) → None
+## Implementation
 
-Clear all entries from a tape and reset its state.
+### Thread Safety
 
-**Algorithm:**
-1. Delete all entries from `tape_entries` where `tape_id = ?`
-2. **Delete all anchors from `anchors` where `tape_id = ?`**
-3. Reset `next_entry_id` to 0
+SQLite connection opened with `check_same_thread=False`. `AsyncTapeStoreAdapter` serializes access via `threading.Lock`.
 
-**Note:** Reset only affects the target tape. Parent entries shared via fork are not modified (they belong to the parent tape).
+### Entry ID in Merged View
 
-## Parents Cache Maintenance
+Original entry IDs are preserved. No `ROW_NUMBER()` renumbering — the contiguous allocation guarantee (I1) ensures merged views are gap-free.
 
-The `parents_cache` column is eagerly maintained on fork:
+### Async Adapter
 
 ```python
-def compute_parents_cache(source_id, source_parent_entry_id, source_parents_cache):
-    chain = json.loads(source_parents_cache or "[]")
-    chain.append([source_id, source_parent_entry_id])
-    return json.dumps(chain)
+store = AsyncTapeStoreAdapter(Path("/tmp/tape.db"))
+await store.append("main", TapeEntry(...))
+entries = await store.read("main")
 ```
 
-**Example:**
+Wraps sync core with `asyncio.to_thread()`. Exposes `AsyncTapeStore` protocol.
 
-```
-tape_a (id=1, root): parents_cache = "[]"
-  
-tape_b forked from tape_a at entry 50:
-  parents_cache = "[[1, 50]]"
-  
-tape_c forked from tape_b at entry 10:
-  parents_cache = "[[1, 50], [2, 10]]"
-```
+## Performance
 
-When reading `tape_c` with cached query:
-- Read entries from tape_1 (id=1) up to entry_id 50
-- Read entries from tape_2 (id=2) up to entry_id 10
-- Read all entries from tape_3 (id=3, the leaf)
+| Operation | Complexity | Typical |
+|-----------|-----------|---------|
+| create | O(1) | < 1ms |
+| append | O(1) | ~0.03ms |
+| fork | O(1) | ~0.03ms |
+| read root | O(N) | ~2μs/entry |
+| read merged (3-level) | O(N) | ~2μs/entry |
+| after_anchor root | O(log N + M) | ~0.5ms |
+| after_anchor forked | O(depth × log N + M) | ~2ms |
 
-## Garbage Collection Consideration
+## Future Plans
+
+### Garbage Collection
 
 With metadata-only forks, parent entries cannot be deleted while any child references them. A reference counting or lineage tracking mechanism would be needed for GC.
 
 For now, entries are kept indefinitely (true append-only). If storage becomes a concern, a background sweep can:
 1. Identify root tapes with no active forks referencing them
 2. Archive or delete their unreferenced entries
-
-## Implementation Design Changes
-
-### Merged View Entry IDs
-
-The merged view preserves the **original entry IDs** from each ancestor tape. This is correct because:
-
-- Root tape entries use IDs `0, 1, 2, ...`
-- Forked tape own entries start at `parent_entry_id + 1`
-- The inherited range `0..N` and own range `N+1..` never overlap (I3)
-- Therefore the merged view is naturally gap-free without renumbering
-
-This differs from an earlier design that used `ROW_NUMBER()` to reassign IDs. The current approach:
-- Preserves entry IDs across fork boundaries (useful for debugging and linking)
-- Simplifies anchor resolution (anchor entry IDs match the stored value)
-- Avoids O(N) window function overhead
-
-### Connection Thread Safety
-
-The SQLite connection is opened with `check_same_thread=False` to support the async adapter, which delegates operations to worker threads via `asyncio.to_thread()`. A `threading.Lock` in the async adapter serializes access to ensure SQLite thread safety.
-
-## Performance Characteristics
-
-Benchmarked on typical development hardware:
-
-| Operation | Threshold | Typical |
-|-----------|-----------|---------|
-| Fork (1000 entries) | < 10ms | ~0.03ms |
-| Read merged (3-level, 1700 entries) | < 50ms | ~4.5ms |
-| Append throughput (100 entries) | < 100ms | ~3ms |
-| Large tape read (10000 entries) | < 100ms | ~22ms |
-| **after_anchor root (10000 entries)** | **< 5ms** | **~0.5ms** |
-| **after_anchor forked (3-level, 1700 entries)** | **< 10ms** | **~2ms** |
-
-**Fork** is O(1) — a single INSERT into the `tapes` table. Time is independent of tape size.
-
-**Read merged** is O(N) where N = visible entries. Linear scaling observed: ~2 microseconds per entry.
-
-**Append** is O(1) per entry — INSERT into `tape_entries` plus UPDATE `next_entry_id`.
-
-**Snapshot** is O(N) — copies all entries from source to target.
-
-**after_anchor (root)** is O(log N) — indexed lookup in `anchors` table plus O(M) result fetch. Previously O(N) linear scan.
-
-**after_anchor (forked)** is O(depth × log N + M) — CTE recursion over ancestor chain with indexed anchor lookups at each level. Previously O(N) linear scan of full merged view.
-
-## Async Adapter (Public Interface)
-
-The store implements the `AsyncTapeStore` protocol from `republic`. This is the **only public interface** — all external code (including Bub) consumes the store through this async protocol.
-
-```python
-from pathlib import Path
-from bub_sf.store import AsyncTapeStoreAdapter, TapeEntry
-
-store = AsyncTapeStoreAdapter(Path("/tmp/tape.db"))
-
-# All methods are async — matches AsyncTapeStore protocol
-await store.append("main", TapeEntry(...))
-entries = await store.read("main")
-await store.fork("main", "main-v2")
-```
-
-The adapter wraps the sync store with `asyncio.to_thread()` and uses a `threading.Lock` to serialize concurrent access.
-
-**Internal vs Public:**
-- `SQLiteForkTapeStore` (sync core): **Internal only.** Never instantiated directly by application code. Guarantees invariants I1–I6.
-- `AsyncTapeStoreAdapter` (async wrapper): **Public interface.** Exposes the `AsyncTapeStore` protocol. All reads and writes go through the sync core, so invariants are preserved.
-
-This split ensures that:
-1. Invariant-critical code is isolated in the sync core
-2. The public API matches Republic's `AsyncTapeStore` protocol exactly
-3. Async consumers (Bub's agent loop) get a non-blocking interface
-
-## Usage Examples
-
-### Basic tape operations
-
-```python
-from bub_sf.store import ForkTapeStore, TapeEntry
-from pathlib import Path
-
-store = ForkTapeStore(Path("app.db"))
-
-# Append entries — entry_id is auto-assigned by the store
-# (the entry_id field in TapeEntry is ignored on append)
-entry_id = store.append("chat", TapeEntry(
-    kind="message",
-    payload={"role": "user", "content": "hello"},
-    date="2024-01-01T00:00:00",
-))
-assert entry_id == 0  # First entry in a new root tape
-
-# Read all entries
-entries = store.read("chat")
-
-# List tapes
-names = store.list_tapes()
-
-# Reset (clear) a tape
-store.reset("chat")
-```
-
-### Forking a tape
-
-```python
-# Create a parent tape
-for i in range(5):
-    store.append("parent", TapeEntry(
-        kind="message",
-        payload={"index": i},
-        date="2024-01-01T00:00:00",
-    ))
-
-# Fork at current tip (last entry was 4)
-store.fork("parent", "child")
-
-# Child sees all parent entries
-assert len(store.read("child")) == 5
-
-# Child appends independently — IDs continue from fork point
-entry_id = store.append("child", TapeEntry(
-    kind="message",
-    payload={"index": 5},
-    date="2024-01-01T00:00:00",
-))
-assert entry_id == 5  # Own entry, starts at parent_entry_id + 1 = 4 + 1
-
-# Parent is unchanged
-assert len(store.read("parent")) == 5
-```
-
-### Query with filters
-
-```python
-from bub_sf.store import TapeQuery
-
-# Fetch only "message" entries after anchor "a1"
-# anchor "a1" was appended as TapeEntry(kind="anchor", payload={"name": "a1"}, ...)
-result = store.fetch_all(TapeQuery(
-    tape="chat",
-    kinds=("message",),
-    after_anchor="a1",
-    limit=10,
-))
-```
-
-### Snapshot (deep copy)
-
-```python
-# Create an independent copy
-store.snapshot("parent", "backup")
-
-# Modifying parent does not affect backup
-store.append("parent", TapeEntry(...))
-assert len(store.read("backup")) == len(store.read("parent")) - 1
-```
-
-## Comparison with Current ForkTapeStore
-
-| Aspect | Current (bub) | New (bub_sf) |
-|--------|---------------|--------------|
-| Fork cost | Instant (contextvar) | Instant (metadata) |
-| Fork scope | Temporary (context manager) | Persistent |
-| Merge back | Automatic on context exit | Explicit (not needed) |
-| Storage sharing | In-memory buffer | SQL-level metadata |
-| Nested forks | Not supported | Full tree support |
-| Read performance | O(N) merge | O(N) union query |
-| Entry IDs | Per-session | Global monotonic in merged view |
-| Async support | Not supported | AsyncTapeStoreAdapter |
-| **Anchor resolution** | **O(N) scan** | **O(log N) index** |
