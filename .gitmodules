@@ -1,3 +1,6 @@
 [submodule "bub"]
 	path = bub
 	url = https://github.com/bubbuild/bub.git
+[submodule "republic"]
+	path = republic
+	url = https://github.com/bubbuild/republic
