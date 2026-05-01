@@ -2,7 +2,11 @@
 
 ## Overview
 
-ForkTapeStore is a SQLite-backed append-only tape store that supports instant branching via copy-on-write semantics. A fork creates a new tape that shares history with its parent up to a specific point, then diverges independently.
+ForkTapeStore is a SQLite-backed append-only tape store that implements the `AsyncTapeStore` protocol from `republic`. It supports instant branching via copy-on-write semantics. A fork creates a new tape that shares history with its parent up to a specific point, then diverges independently.
+
+**Interface target:** `AsyncTapeStore` (async protocol). The store is accessed through `AsyncTapeStoreAdapter` which wraps the sync SQLite implementation.
+
+**Fork semantics:** This is a **persistent, metadata-only fork** — a permanent branch in the database, not a temporary runtime context. Forks survive process restarts and can be forked again. This is fundamentally different from Bub's `ForkTapeStore` which uses `contextvars` for temporary session-scoped forks that merge back on context exit.
 
 ## Key Properties
 
@@ -11,6 +15,19 @@ ForkTapeStore is a SQLite-backed append-only tape store that supports instant br
 - **Monotonic entry IDs**: Merged view presents continuous, gap-free entry IDs
 - **Nested forks**: Forks can be forked, creating trees of arbitrary depth
 - **Physical snapshot**: Optional deep copy for independent lifecycle
+- **Persistent branches**: Forks are durable database records, not runtime context
+
+## Principles
+
+### Core-Interface Split
+
+The implementation is split into two layers with a single rule: **core operations maintain invariants; interface operations never bypass the core.**
+
+**Core operations** (`fork`, `snapshot`, `append`, `reset`) are the only code that writes to the database. Each core operation is responsible for maintaining all invariants (I1–I6) atomically. When any code calls only core operations, the database is always in a valid state.
+
+**Interface operations** (`read`, `fetch_all`, `list_tapes`) are read-only or compositional. They may build complex queries on top of the core, but they never write to the database except by calling core operations. This means interface bugs can return wrong results, but they cannot corrupt data.
+
+This split makes the sync core (`SQLiteForkTapeStore`) the trust boundary. The async adapter (`AsyncTapeStoreAdapter`) and all query logic sit above it, consuming the core's guarantees without being able to violate them.
 
 ## Schema
 
@@ -56,9 +73,9 @@ CREATE INDEX idx_entries_tape_entry ON tape_entries(tape_id, entry_id);
 ```
 
 **Notes:**
-- The `UNIQUE(tape_id, entry_id)` constraint is not yet enforced by the implementation (to be added).
 - Field names match republic's `TapeEntry` model directly: `payload`, `meta`, `date`.
 - There is no `anchor` column. Anchor metadata lives exclusively in the `anchors` table, populated when an entry with `kind="anchor"` is appended.
+- The `UNIQUE(tape_id, entry_id)` constraint on `tape_entries` is not enforced because entry IDs are guaranteed contiguous by I2 and enforced by application logic (using `next_entry_id` as the sole allocator).
 
 ### anchors Table
 
@@ -390,7 +407,7 @@ This version would be O(1) complexity for the metadata lookup and O(N) for the e
 
 ## Operations
 
-### fork(source_name: str, target_name: str) → None
+### fork(source: str, name: str) → None
 
 Create a new tape that shares history with the source up to the current latest entry.
 
@@ -415,7 +432,7 @@ Create a new tape that shares history with the source up to the current latest e
 **Time complexity:** O(1) — single INSERT, no data copying
 **Space complexity:** O(1) — metadata only
 
-### snapshot(source_name: str, target_name: str) → None
+### snapshot(source: str, name: str) → None
 
 Create an independent physical copy of the source tape. The new tape has no parent.
 
@@ -450,10 +467,16 @@ Append a new entry to a tape. Returns the assigned `entry_id`.
 
 ### fetch_all(query: TapeQuery) → list[TapeEntry]
 
-Read entries from a tape, applying filters from the TapeQuery.
+**Interface operation.** Read entries from a tape, applying filters from the TapeQuery.
+
+This is the primary query method exposed by the `AsyncTapeStore` protocol. It handles all query parameters:
+- `tape`: tape name (required)
+- `kinds`: filter by entry kind
+- `limit`: maximum results
+- `after_anchor`: entries after named anchor
 
 **Algorithm:**
-1. Resolve tape by name
+1. Resolve tape by name from `query.tape`
 2. If root tape: query `tape_entries` directly
 3. If fork: use CTE recursive query for merged view
 4. Apply additional filters (kinds, limit, after_anchor) from TapeQuery
@@ -464,9 +487,9 @@ Read entries from a tape, applying filters from the TapeQuery.
 
 ### read(tape_name: str) → list[TapeEntry] | None
 
-Convenience method: return all entries for a tape (merged view).
+**Interface operation.** Convenience method: return all entries for a tape (merged view).
 
-Equivalent to `fetch_all(TapeQuery(tape_name=tape_name))`.
+Equivalent to `fetch_all(TapeQuery(tape=tape_name))`.
 
 ### reset(tape_name: str) → None
 
@@ -517,21 +540,19 @@ For now, entries are kept indefinitely (true append-only). If storage becomes a 
 
 ## Implementation Design Changes
 
-### ROW_NUMBER() Approach
+### Merged View Entry IDs
 
-The merged view uses SQLite's `ROW_NUMBER()` window function to generate continuous entry IDs at query time:
+The merged view preserves the **original entry IDs** from each ancestor tape. This is correct because:
 
-```sql
-SELECT 
-    ROW_NUMBER() OVER (ORDER BY e.depth DESC, e.entry_id ASC) - 1 as entry_id,
-    e.kind, e.payload, e.meta, e.date
-```
+- Root tape entries use IDs `0, 1, 2, ...`
+- Forked tape own entries start at `parent_entry_id + 1`
+- The inherited range `0..N` and own range `N+1..` never overlap (I3)
+- Therefore the merged view is naturally gap-free without renumbering
 
-This approach:
-- Avoids storing merged view IDs in the database
-- Handles any depth of nesting transparently
-- Works with both CTE and cached query paths
-- Is O(N) where N = visible entries
+This differs from an earlier design that used `ROW_NUMBER()` to reassign IDs. The current approach:
+- Preserves entry IDs across fork boundaries (useful for debugging and linking)
+- Simplifies anchor resolution (anchor entry IDs match the stored value)
+- Avoids O(N) window function overhead
 
 ### Connection Thread Safety
 
@@ -562,9 +583,9 @@ Benchmarked on typical development hardware:
 
 **after_anchor (forked)** is O(depth × log N + M) — CTE recursion over ancestor chain with indexed anchor lookups at each level. Previously O(N) linear scan of full merged view.
 
-## Async Adapter
+## Async Adapter (Public Interface)
 
-For async contexts, use `AsyncTapeStoreAdapter`:
+The store implements the `AsyncTapeStore` protocol from `republic`. This is the **only public interface** — all external code (including Bub) consumes the store through this async protocol.
 
 ```python
 from pathlib import Path
@@ -572,13 +593,22 @@ from bub_sf.store import AsyncTapeStoreAdapter, TapeEntry
 
 store = AsyncTapeStoreAdapter(Path("/tmp/tape.db"))
 
-# All methods are async
+# All methods are async — matches AsyncTapeStore protocol
 await store.append("main", TapeEntry(...))
 entries = await store.read("main")
 await store.fork("main", "main-v2")
 ```
 
 The adapter wraps the sync store with `asyncio.to_thread()` and uses a `threading.Lock` to serialize concurrent access.
+
+**Internal vs Public:**
+- `SQLiteForkTapeStore` (sync core): **Internal only.** Never instantiated directly by application code. Guarantees invariants I1–I6.
+- `AsyncTapeStoreAdapter` (async wrapper): **Public interface.** Exposes the `AsyncTapeStore` protocol. All reads and writes go through the sync core, so invariants are preserved.
+
+This split ensures that:
+1. Invariant-critical code is isolated in the sync core
+2. The public API matches Republic's `AsyncTapeStore` protocol exactly
+3. Async consumers (Bub's agent loop) get a non-blocking interface
 
 ## Usage Examples
 
@@ -590,13 +620,14 @@ from pathlib import Path
 
 store = ForkTapeStore(Path("app.db"))
 
-# Append entries — entry_id is auto-assigned
+# Append entries — entry_id is auto-assigned by the store
+# (the entry_id field in TapeEntry is ignored on append)
 entry_id = store.append("chat", TapeEntry(
     kind="message",
     payload={"role": "user", "content": "hello"},
     date="2024-01-01T00:00:00",
 ))
-assert entry_id == 0  # First entry in a new tape
+assert entry_id == 0  # First entry in a new root tape
 
 # Read all entries
 entries = store.read("chat")
@@ -619,7 +650,7 @@ for i in range(5):
         date="2024-01-01T00:00:00",
     ))
 
-# Fork at current tip
+# Fork at current tip (last entry was 4)
 store.fork("parent", "child")
 
 # Child sees all parent entries
@@ -631,7 +662,7 @@ entry_id = store.append("child", TapeEntry(
     payload={"index": 5},
     date="2024-01-01T00:00:00",
 ))
-assert entry_id == 5  # Auto-assigned, continues from fork point
+assert entry_id == 5  # Own entry, starts at parent_entry_id + 1 = 4 + 1
 
 # Parent is unchanged
 assert len(store.read("parent")) == 5
@@ -645,7 +676,7 @@ from bub_sf.store import TapeQuery
 # Fetch only "message" entries after anchor "a1"
 # anchor "a1" was appended as TapeEntry(kind="anchor", payload={"name": "a1"}, ...)
 result = store.fetch_all(TapeQuery(
-    tape_name="chat",
+    tape="chat",
     kinds=("message",),
     after_anchor="a1",
     limit=10,

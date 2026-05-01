@@ -1,5 +1,24 @@
 
+--| Async cell
+-- currently only possibly returned by bub_sf prim_ops
+prim_type Async a
+
 {-# LLM #-}
--- | expand the input message
+--| expand the input message
 prim_op test_llm :: String -- ^ the message
-  -> String
+  -> Async String
+
+--| get the async cell result
+prim_op async_tryget :: forall a. Async a -> Maybe a
+
+--| get the async cell result, blocking
+prim_op async_get :: forall a. Async a -> a
+
+--| register an async value to notify the agent of readiness later
+prim_op async_notifyme :: forall a. String --^ the message to notify with
+  -> Async a -> ()
+
+--| sleep for a given number of milliseconds
+-- the pattern: async_notifyme "check something" (sleep 60000)
+prim_op sleep :: Int -- ^ milliseconds to sleep
+  -> Async ()

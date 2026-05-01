@@ -16,6 +16,7 @@ from bub.tools import tool
 from bub.types import Envelope, State
 
 from bub_sf.bub_ext import BubExt
+from bub_sf.channels.notification import NotificationChannel
 from systemf.elab3.repl import REPL
 from systemf.elab3.repl_driver import REPLDriver
 from systemf.elab3.repl_session import REPLSession
@@ -100,6 +101,7 @@ class SFHookImpl:
 
     framework: BubFramework
     _repl: REPL
+    _notification_channel: NotificationChannel | None = None
 
     def __init__(self, framework: BubFramework) -> None:
         # The module-level @tool already ran when Python imported this module,
@@ -121,11 +123,21 @@ class SFHookImpl:
     @hookimpl
     async def load_state(self, message: Envelope, session_id: str) -> State:
         """Populate state with a persistent REPLSession for this conversation."""
-        return {
+        state: State = {
             "sf_ctx": self,
         }
+        if self._notification_channel is not None:
+            state["notification_channel"] = self._notification_channel
+        return state
 
     @hookimpl
     def system_prompt(self, prompt: str | list[dict], state: State) -> str:
         """Tell the LLM it has a System F REPL available via sf.repl."""
         return SYSTEM_PROMPT
+
+    @hookimpl
+    def provide_channels(self, message_handler) -> list:
+        """Provide the notification channel for async events."""
+        from bub_sf.channels.notification import NotificationChannel
+        self._notification_channel = NotificationChannel(on_receive=message_handler)
+        return [self._notification_channel]

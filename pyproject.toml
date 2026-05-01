@@ -13,16 +13,19 @@ members = [
     "systemf",
     "bub_sf",
     "bub",
+    "republic",
 ]
 
 [tool.uv.sources]
 systemf = { workspace = true }
 bub_sf = { workspace = true }
 bub = { workspace = true }
+republic = { workspace = true }
 
 [tool.pyright]
 extraPaths = [
   "bub_sf/src/",
   "systemf/src/",
   "bub/src/",
+  "republic/src/",
 ]
