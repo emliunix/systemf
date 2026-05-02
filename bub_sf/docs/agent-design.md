@@ -396,6 +396,72 @@ main = \user_input ->
 
 Here `recall` is a System F primitive backed by the agent's tool-calling capability, but the top-level `main` is explicitly typed as returning `LLM ()` so the runtime knows to enter the agent loop rather than treating it as a pure function.
 
+### System F to Python Correspondence
+
+| System F | Python | Notes |
+|---|---|---|
+| `Tape` | `str` (tape name) | The runtime passes the tape name string; the agent resolves it via `session_tape()` or `llm.tape()` |
+| `LLM a` | `AsyncStreamEvents` | Represents the streaming agent computation; for non-streaming cases the runtime awaits the full result |
+| `String` | `str` | The last user input, not the full message history |
+
+### Tape Naming and Linking
+
+For now, tapes are identified by strings with naming conventions rather than explicit dependency links:
+
+```haskell
+tape_name :: Tape -> String
+mk_tape   :: String -> Tape
+```
+
+**Example**: Deriving a dependent tape name from the current tape:
+
+```haskell
+recall_tape :: Tape = mk_tape ((tape_name (current_tape ())) ++ "_recall_ctx")
+```
+
+**Future work**: We may add explicit tape dependency links (e.g., `parent_tape`, `derived_from`) so the runtime can track provenance chains rather than relying on string conventions.
+
+**Design note on `set_return`**: When synthesizing the agent's tool interface, the runtime generates a `set_return` tool so the LLM can communicate its result back. For return type `()` (unit), the result cell can be **pre-filled with unit** before the LLM call — the LLM does not need to invoke `set_return` at all. This eliminates the awkward "chat via tool call" pattern for void-returning agent functions.
+
+## Integration Plan
+
+### Hook Override
+
+Override `run_model_stream` in the `bub_sf` hook implementation to:
+
+1. **Evaluate** the user's System F program to obtain a synthesized function of type `String -> LLM ()`
+2. **Apply** the user prompt to this function
+3. **Dispatch** based on the return type:
+   - If the result is **not** `LLM ()`, treat it as a pure computation and return the result directly (via `run_model`)
+   - If the result **is** `LLM ()`, enter the agent loop via `run_model_stream` and wrap the `AsyncStreamEvents` in a `VPrim`
+
+### REPL Extension: `unsafe_eval`
+
+The Python `REPLSession` needs an `unsafe_eval` method that calls the underlying evaluator with a raw core expression. This allows the runtime to evaluate the synthesized `main` function with a `StringLit` value directly:
+
+```python
+# Python extension on REPLSession
+class REPLSession:
+    def unsafe_eval(self, expr: CoreExpr) -> Value:
+        """Evaluate a raw core expression bypassing the parser."""
+        return self._evaluator.eval(expr)
+```
+
+**Use case**: When `run_model_stream` receives a user prompt, the hook implementation synthesizes a core expression representing `main "user prompt"`, then calls `repl.unsafe_eval(expr)` to reduce it. If the result is `LLM ()`, the runtime enters the agent loop; otherwise it returns the pure value.
+
+### LLM Synthesizer
+
+The synthesizer is the heaviest component. For each `{-# LLM #-}` function call site, it must:
+
+1. **Render the prompt**: Concatenate all `{-# PROMPT #-}`-marked arguments into the user message
+2. **Fork the REPL**: Create a fresh evaluation context for the LLM to execute tool calls
+3. **Pass state**: Thread the current `tape.context.state` into the forked REPL so tools can access it
+4. **Call the agent**:
+   - If the function returns a non-`LLM` type, call `run_model` (single-turn, synchronous)
+   - If the function returns `LLM ()`, call `run_model_stream` and wrap the resulting `AsyncStreamEvents` in a `VPrim` so the System F runtime can stream it back to the caller
+
+The synthesizer bridges the gap between System F's pure functional semantics and the bub agent's imperative, streaming, stateful execution model.
+
 ## Context and Handoff Behavior
 
 ### Auto-Handoff Mechanism
