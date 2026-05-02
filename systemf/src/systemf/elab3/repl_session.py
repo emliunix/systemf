@@ -1,8 +1,11 @@
 
 from typing import Any, Callable, Protocol, cast, overload, override
 
+from pyrsistent import pmap
+
 from systemf.elab3.core_extra import CoreBuilderExtra
 from systemf.elab3.types.ast import ImportDecl
+from systemf.elab3.types.core import CoreTm
 from systemf.elab3.types.protocols import NameGenerator, REPLSessionProto, Synthesizer
 from systemf.surface.parser import parse_expression, parse_program, ParseError
 from systemf.surface.types import SurfaceTermDeclaration
@@ -145,6 +148,10 @@ class REPLSession(EvalCtx, REPLSessionProto):
                 case _:
                     raise Exception(f"Expected single binding for `it`, got: {names}")
         return None
+
+    @override
+    async def unsafe_eval(self, input: CoreTm) -> Val:
+        return await self._evaluator._eval_expr(input, pmap())
 
     # --- EvalCtx implementation ---------------------------------------------
 

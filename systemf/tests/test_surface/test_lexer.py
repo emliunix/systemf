@@ -100,8 +100,7 @@ class TestBasicTokens:
         tokens = lex(source)
         types = [type(t).__name__ for t in tokens]
         assert types == [
-            "LeftParenToken",
-            "RightParenToken",
+            "UnitToken",
             "LeftBracketToken",
             "RightBracketToken",
             "LeftBraceToken",

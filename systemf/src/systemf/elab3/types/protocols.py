@@ -7,6 +7,7 @@ from .ast import ImportDecl
 from .mod import Module
 from .ty import Id, Name, Ty
 from .val import Val
+from .core import CoreTm
 from .tything import AnId, TyThing
 
 from systemf.utils.uniq import Uniq
@@ -43,6 +44,13 @@ class REPLSessionProto(TyLookup, Protocol):
     def add_return(self, ref: list[Val | None], ty: Ty) -> None: ...
     def add_import(self, decl: ImportDecl) -> None: ...
     async def eval(self, input: str) -> tuple[Val, Ty] | None: ...
+    # for programmatic calling
+    # 1. it's expr only, so no new def/bindings added
+    # 2. we don't have a valid/easy way to input surface ast programmatically
+    # 3. the use case is mainly for value passing like big chunk of LitString
+    async def unsafe_eval(self, input: CoreTm) -> Val:
+        """The untyped variant of eval"""
+        ...
 
 
 class NameGenerator(Protocol):
