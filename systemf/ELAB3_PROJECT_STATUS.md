@@ -55,6 +55,7 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 9. **Pretty-print builtin types with special syntax** `#issue`: The pretty printer still outputs raw constructors (e.g., `Cons 1 Cons 2 Nil :: List Int`, `MkUnit :: Unit`, `MkPair 1 2 :: Pair Int Int`). Should detect these builtins and emit surface syntax: `[1, 2] :: [Int]`, `() :: ()`, `(1, 2) :: (Int, Int)`.
 10. **Argument-level pragma `{-# PROMPT #-}`** `#feature`: Support `{-# PROMPT #-}` annotations on function parameters to mark arguments that should be concatenated into the LLM user prompt. Enables fine-grained control over prompt construction for `{-# LLM #-}` functions (see `bub_sf/docs/agent-design.md:365-375`).
 11. **Expose/synthesize Python module from SystemF module** `#exploration`: Explore generating a Python module from a compiled SystemF module. The practical benefit is not yet clear, but it would be a cool bridge between the two languages.
+12. **Enforce import semantics** `#issue`: We should `eval_mod` of imported modules first, so the order of evaluation is controlled by import statements. For this to work, we need to preserve the import module names and their order from program parsing through to the `Module` object.
 
 
 ## Entry Points

@@ -1,5 +1,7 @@
 # The Agentic scripting language
 
+**Agentic thinking, organized, by humans and agents.**
+
 A language designed to be small, focused on REPL usage with fork support.
 
 The idea to fork is inspired by [bub](https://github.com/bubbuild/bub), and this project is also a plugin to bub.
@@ -9,7 +11,7 @@ So LLM actions and plain programs can be mixed and inter-communicate freely.
 
 The initial goal of the project is to organize LLM thinking programmatically.
 So we also leverage the tape of **bub** and expose it as primitives to control the context,
-by both programs and LLM.
+by both programs and LLM and LLM written programs.
 
 ## Example: simple LLM call as a function
 
@@ -21,6 +23,39 @@ prim_op test_llm :: String -- ^ the message
 ```
 
 ![example](./assets/example.png)
+
+## Example: LLM defines its own function
+
+LLM can call `,sf.repl` tool to define it's thinking steps as a function, then call it to execute.
+
+```haskell
+-- ,sf.repl
+data Step =
+  | DoSomething String
+  | Review String
+
+{-# LLM #-}
+-- | come up with a list of steps to do
+-- ensure it's dependencies ordered
+prim_op steps :: String -- ^ the message
+  -> List Step
+
+{-# LLM #-}
+-- | execute the step
+prim_op execute_step :: Step -- ^ the step to execute
+  -> String
+
+go :: String -> String = \msg ->
+  let steps = steps msg
+  in foldl (++) "" (map execute_step steps)
+```
+
+```shell
+# llm calls the flow
+,sf.repl go "hello world"
+```
+
+Comments are rendered as prompts.
 
 ## System F
 
