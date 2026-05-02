@@ -1,6 +1,6 @@
 # SystemF Elab3 - Project Status
 
-**Last Updated:** 2026-04-30
+**Last Updated:** 2026-05-03
 **Test Count:** 364 elab3 tests + 302 surface tests = 666 total
 
 ## Overview
@@ -40,6 +40,7 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 - **REPL `:info` fixes**: `:info` now resolves builtins from the imported/builtin namespace and pretty-prints user-facing output instead of raw internal `Name(...)` values
 - **Non-exhaustive pattern e2e coverage**: Added end-to-end coverage for runtime `Non-exhaustive patterns` failures
 - **PP `{!r}` not accurate** repr converts string to single quoted `'Hello'`. Does not align with the syntax of systemf. Fixed by using `json.dumps` for string literals.
+- **REPL `unsafe_eval`**: Added `unsafe_eval` method to `REPLSession` for evaluating raw core expressions bypassing the parser, enabling runtime synthesis of agent calls (`repl_session.py:153`, `types/protocols.py:51`)
 
 ## Next Steps
 
@@ -52,6 +53,7 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 7. **Generalization produces unreadable skolem names** `#issue`: Skolem type variables are printed as `$a1234`, which is hard to recognize. Should pick a human-readable representative name (e.g., from the original bound variable) during generalization.
 8. **Lazy `\&\&`/`||` syntax** `#issue`: `bool_and` and `bool_or` eagerly evaluate both arguments. Need special AST nodes or desugaring to `if`-then-else so that `\&\&` and `||` short-circuit (lazy) as in most languages.
 9. **Pretty-print builtin types with special syntax** `#issue`: The pretty printer still outputs raw constructors (e.g., `Cons 1 Cons 2 Nil :: List Int`, `MkUnit :: Unit`, `MkPair 1 2 :: Pair Int Int`). Should detect these builtins and emit surface syntax: `[1, 2] :: [Int]`, `() :: ()`, `(1, 2) :: (Int, Int)`.
+10. **Argument-level pragma `{-# PROMPT #-}`** `#feature`: Support `{-# PROMPT #-}` annotations on function parameters to mark arguments that should be concatenated into the LLM user prompt. Enables fine-grained control over prompt construction for `{-# LLM #-}` functions (see `bub_sf/docs/agent-design.md:365-375`).
 
 
 ## Entry Points
