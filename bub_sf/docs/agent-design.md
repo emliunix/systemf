@@ -522,9 +522,363 @@ This message would be included in the sliced history and visible to the LLM on t
 
 **Implication:** Today there is no built-in way to pass a summary through auto-handoff or manual handoff. Any summarization/compaction logic must either append a message entry after the anchor, or change the `TapeContext` to not use `LAST_ANCHOR`.
 
-## Next Steps
+## Design Decision: Agent Stays in `bub`
 
-1. Analyze `TapeService`, `ForkTapeStore`, and `AgentSettings` to determine if they are core or framework
-2. Design the Agent → Framework callback interface (protocol)
-3. Decide which of `tools.py` and `skills.py` move with Agent
-4. Prototype the adapter layer in `BuiltinImpl`
+### What We Tried
+
+We vendored `Agent`, `TapeService`, and `ForkTapeStore` into `bub_sf/src/bub_sf/agent/` and `bub_sf/src/bub_sf/store/`. The key refactoring was changing `Agent.run()` and `Agent.run_stream()` to accept `tape_name: str` instead of `session_id: str`, with the caller responsible for mapping session → tape. This decoupling is correct.
+
+### Why Vendoring Failed
+
+The vendored classes in `bub_sf` are **incompatible with bub's builtin tools**:
+
+- `bub/src/bub/builtin/tools.py` imports `Agent` from `bub.builtin.agent` (`tools.py:1`)
+- The `subagent` tool extracts the agent from `context.state["_runtime_agent"]` and calls `agent.run()` / `agent.run_stream()` (`tools.py:198-210`)
+- Tape manipulation tools (`tape.handoff`, `tape.info`, `tape.reset`) reach into `agent.tapes` and call `TapeService`-specific methods (`tools.py:190-197`, `tools.py:222-227`)
+- `bub/src/bub/channels/cli/__init__.py` takes `Agent` in its constructor and accesses `agent.tapes` and `agent.framework.workspace`
+
+If `bub_sf` has its own `Agent` class, these tools break because they expect the bub `Agent` with its `TapeService` API surface. Maintaining two `Agent` implementations or forking the tools is more complexity than the problem warrants.
+
+### The Correct Boundary
+
+**Agent stays in `bub`.** The tape-name refactoring stays. `bub_sf` imports `Agent` from `bub` and uses it directly.
+
+The boundary is not "which package owns Agent" — it is "what parameters does Agent accept":
+
+| Before (session-coupled) | After (tape-decoupled) |
+|---|---|
+| `Agent.run(session_id=..., prompt=..., state=...)` | `Agent.run(tape_name=..., prompt=..., state=...)` |
+| `TapeService.session_tape(session_id, workspace)` → `Tape` | `TapeService.tape(tape_name)` → `Tape` |
+| Session management is baked into Agent | Session management lives in the caller (framework adapter or `bub_sf` hook impl) |
+
+The `Agent` class still constructs its own `LLM` via `_build_llm()` — there is no benefit to pushing this out. Someone must own the LLM construction, and Agent is the natural place. The `TapeService` still manages archive paths and fork stores — this is fine because `TapeService` stays in `bub` alongside `Agent`.
+
+### What `bub_sf` Actually Needs
+
+`bub_sf` does not need to vendor `Agent`. It needs:
+
+1. **A way to create tapes with stable names** — so it can call `Agent.run(tape_name=...)` predictably
+2. **Its own tape store** — `SQLiteForkTapeStore` in `bub_sf/store/fork_store.py` is a legitimate `bub_sf`-specific implementation of `AsyncTapeStore` with fork support. This can be injected into `Agent` via the framework's `get_tape_store()` hook
+3. **Hook integration** — `bub_sf`'s hook impl calls `Agent.run()` / `Agent.run_stream()` after mapping its own session concept to a tape name
+
+### Revised Vendoring Strategy
+
+This is a refinement of **Option C** from the original design:
+
+> **Option C: Keep Agent in bub, expose via `run_model_stream` contract**
+
+With one amendment: Agent's contract changes from `session_id` to `tape_name`. This is a breaking change to `Agent`'s public API, but it is the right change because it decouples session semantics from tape identity.
+
+The vendored code in `bub_sf/src/bub_sf/agent/` and `bub_sf/src/bub_sf/store/fork_store.py` should be:
+- **`bub_sf/agent/`** — removed entirely. The refactored `Agent` (with `tape_name`) moves back to `bub/src/bub/builtin/agent.py`
+- **`bub_sf/store/fork_store.py`** — kept. This is `bub_sf`'s custom `AsyncTapeStore` implementation (`SQLiteForkTapeStore`). It is not a fork of bub code; it is new code that implements the republic `AsyncTapeStore` protocol
+
+### Impact on Tools
+
+Moving `Agent` back to `bub` restores compatibility:
+
+- `builtin/tools.py` continues to import `Agent` from `bub.builtin.agent`
+- `channels/cli/__init__.py` continues to receive `Agent` directly
+- `hook_impl.py` continues to create `Agent(self.framework)` and cache it
+
+The only change to the tools is that `Agent.run()` now takes `tape_name=` instead of `session_id=`. The `subagent` tool already calls `agent.run()` with keyword arguments, so this is a straightforward update.
+
+### Impact on `bub_sf` Hook Implementation
+
+`bub_sf`'s hook implementation (`bub_sf/hook.py`) currently needs to:
+1. Map its session concept to a tape name
+2. Obtain or create an `Agent` instance (from `bub.builtin.agent`)
+3. Call `agent.run(tape_name=mapped_name, prompt=..., state=...)`
+
+The `Agent` instance can be shared or cached as before. The session → tape mapping is `bub_sf`'s policy decision.
+
+## Architectural Principle: Channel Owns the Session ID
+
+### Provenance
+
+The `session_id` is **not** synthesized by the framework. It originates at the **channel** and flows through the system untouched.
+
+**`bub/src/bub/channels/message.py:33-51`** — `ChannelMessage` requires `session_id`:
+```python
+@dataclass
+class ChannelMessage:
+    session_id: str
+    channel: str
+    content: str
+    chat_id: str = "default"
+    ...
+```
+
+**`bub/src/bub/channels/telegram.py:243`** — Telegram derives it:
+```python
+session_id = f"{self.name}:{chat_id}"   # "telegram:123456789"
+```
+
+**`bub/src/bub/channels/cli/__init__.py:38-46`** — CLI hard-codes it:
+```python
+_session_id = "cli_session"
+```
+
+**`bub_sf/src/bub_sf/channels/notification.py:47-54`** — Notification channel:
+```python
+session_id = f"{self.SESSION_PREFIX}:{chat_id}"  # "notification:<chat_id>"
+```
+
+### Framework's Role: Passive Transport
+
+**`bub/src/bub/framework.py:105-114`** — The framework resolves `session_id` via the `resolve_session` hook, but the default resolver just echoes back what the channel already put on the message:
+```python
+session_id = await self._hook_runtime.call_first(
+    "resolve_session", message=inbound
+) or self._default_session_id(inbound)
+```
+
+**`bub/src/bub/builtin/hook_impl.py:104-111`** — `BuiltinImpl.resolve_session` returns `message.session_id` verbatim:
+```python
+@hookimpl
+def resolve_session(self, message: ChannelMessage) -> str:
+    session_id = field_of(message, "session_id")
+    if session_id is not None and str(session_id).strip():
+        return str(session_id)
+    ...
+```
+
+**`bub/src/bub/framework.py:114-119`** — The framework injects `_runtime_workspace` into state, but does **not** store, index, or route by `session_id`:
+```python
+state = {"_runtime_workspace": str(self.workspace)}
+```
+
+**`bub/src/bub/framework.py:146-188`** — `_run_model` merely forwards `session_id` to the hook runtime:
+```python
+async def _run_model(..., session_id: str, ...):
+    ...
+    stream = await self._hook_runtime.run_model_stream(
+        prompt=prompt, session_id=session_id, state=state
+    )
+```
+
+### Implication: Session is Channel Policy, Not Framework Policy
+
+Because the channel originates `session_id`, different channels can have different session scoping policies:
+- **Telegram**: one session per chat (`telegram:<chat_id>`)
+- **CLI**: one global session (`cli_session`) regardless of who is typing
+- **Notification**: one session per notification target (`notification:<chat_id>`)
+- **Future channels**: could use user ID, thread ID, or anything else
+
+The framework **cannot** assume a universal session semantics because it does not control session creation. It can only guarantee that every inbound message has a non-empty `session_id` string by the time it reaches hooks.
+
+### Implication for Tape Naming
+
+Since `session_id` is channel policy, and `workspace` is framework boot-time policy (`Path.cwd()`), the combination `session_id + workspace` is a **concern of the application layer** (the builtin implementation or a plugin), not the framework.
+
+This reinforces the decision to:
+1. Keep `session_id` in the framework hook contract
+2. Let `BuiltinImpl` (or `bub_sf`'s hook impl) map `session_id + workspace → tape_name`
+3. Pass `tape_name` to `Agent`, which remains session-agnostic
+
+The framework stays ignorant of both sessions and tapes. The channel owns the session. The builtin/plugin owns the mapping. The agent owns the loop.
+
+## Plugin Precedence: `bub_sf` Can Override `BuiltinImpl`
+
+### Critical Correction
+
+`bub_sf` is **not** a passive state-injecting plugin riding on top of `BuiltinImpl`. It is a **full plugin** that can override any hook, including `run_model_stream`.
+
+**`bub/src/bub/hook_runtime.py:178-192`** — `HookRuntime.run_model_stream()` checks plugins in **reverse registration order**:
+```python
+async def run_model_stream(
+    self, prompt: str | list[dict], session_id: str, state: dict[str, Any]
+) -> AsyncStreamEvents | None:
+    for _, plugin in reversed(self._plugin_manager.list_name_plugin()):
+        if hasattr(plugin, "run_model_stream"):
+            return await self.call_first("run_model_stream", prompt=prompt, session_id=session_id, state=state)
+        elif hasattr(plugin, "run_model"):
+            async def iterator() -> AsyncGenerator[StreamEvent, None]:
+                result = await self.call_first("run_model", prompt=prompt, session_id=session_id, state=state)
+                yield StreamEvent("text", {"delta": result})
+            return AsyncStreamEvents(iterator(), state=StreamState())
+    return None
+```
+
+Since `BuiltinImpl` is loaded first (`framework.py:45` calls `_load_builtin_hooks`) and `bub_sf` is discovered later, **`reversed()` puts `bub_sf` first.** If `bub_sf` implements `run_model_stream`, it **shadows** `BuiltinImpl`'s implementation.
+
+### What This Means for Streaming
+
+**`bub_sf` receives the live `AsyncStreamEvents` at the hook level**, not just at the channel level. The full flow is:
+
+```
+[Channel] → ChannelMessage(session_id=...)
+    ↓
+[Framework] process_inbound() → _run_model(stream_output=True)
+    ↓
+[HookRuntime] run_model_stream() → finds bub_sf first
+    ↓
+[bub_sf SFHookImpl.run_model_stream()]
+    ├── Maps session_id → tape_name
+    ├── Calls Agent.run_stream(tape_name=...) → AsyncStreamEvents
+    └── Returns AsyncStreamEvents to framework
+    ↓
+[Framework._run_model()] wraps via OutboundRouter → channel.stream_events()
+    ↓
+[Channel] renders live stream (CLI) or consumes silently (Telegram)
+    ↓
+[Framework] assembles final str → process_inbound returns TurnResult
+```
+
+`bub_sf` has full control over:
+1. **Session→tape mapping policy** — how `session_id` becomes `tape_name`
+2. **Whether to call the agent at all** — for pure System F computations, return a synthetic stream without touching Agent
+3. **Stream transformation** — filter, buffer, or augment events before returning
+4. **Fallback to `run_model`** — if `bub_sf` only implements `run_model`, `HookRuntime.run_model_stream` will wrap the string result in a synthetic `AsyncStreamEvents`
+
+### Channel's Role in Streaming
+
+The channel does **not** receive `AsyncStreamEvents` as a return value. It receives it via `stream_events()` as an **observer wrapper** (`channels/base.py:39-41`):
+
+```python
+def stream_events(self, message: ChannelMessage, stream: AsyncIterable[StreamEvent]) -> AsyncIterable[StreamEvent]:
+    """Optionally wrap the output stream for this channel."""
+    return stream
+```
+
+**CLI** (`cli/__init__.py:141-160`) uses this to render live text via Rich's `Live` display. **Telegram** does not override it, so Telegram gets no live rendering — only the final message via `send()`.
+
+The channel's `stream_events()` is a **display concern**. `bub_sf`'s `run_model_stream()` is a **semantic concern**. They are orthogonal layers.
+
+## ChannelManager and Async Event Stream Mechanics
+
+### What `ChannelManager` Is
+
+`ChannelManager` (`bub/src/bub/channels/manager.py:44`) is **not** a hook or plugin. It is a concrete runtime class instantiated by CLI entry points (`bub chat`, `bub gateway` in `builtin/cli.py:86-105`). It acts as the **bridge** between channels and the framework.
+
+### Four Responsibilities
+
+| Responsibility | Location | Description |
+|---|---|---|
+| **Inbound queue + session routing** | `manager.py:63` | Receives `ChannelMessage` from channels, routes per `session_id` |
+| **Outbound router** | `manager.py:86, 107, 119` | Implements `OutboundChannelRouter`; binds to framework via `bind_outbound_router(self)` |
+| **Task lifecycle tracking** | `manager.py:150-153` | Tracks `asyncio.Task` objects per `session_id`; `quit()` cancels them |
+| **Channel lifecycle** | `manager.py:145-146` | Starts/stops channels; discovers them via `framework.get_channels()` |
+
+### Inbound Flow
+
+```
+[CLI Channel] ──on_receive──► [ChannelManager.on_receive()] ──queue──► [ChannelManager.listen_and_run()] ──► [Framework.process_inbound()]
+```
+
+`on_receive()` (`manager.py:63`) selects a **per-session handler**:
+
+```python
+# manager.py:69-81
+if session_id not in self._session_handlers:
+    if self._channels[channel].needs_debounce:
+        handler = BufferedMessageHandler(self._messages.put, ...)   # Telegram
+    else:
+        handler = self._messages.put                                 # CLI
+    self._session_handlers[session_id] = handler
+await self._session_handlers[session_id](message)
+```
+
+**Decision rule**: `Channel.needs_debounce` is a property declared by the channel class. `TelegramChannel` overrides it to `True` (`telegram.py:165-166`); `CliChannel` inherits `False` from `Channel` base (`channels/base.py:25-27`). The manager **interprets** the flag but does not override it.
+
+`BufferedMessageHandler` (`channels/handler.py:9`) batches messages with debounce (`debounce_seconds=1.0`), max wait (`max_wait_seconds=10.0`), and active time window (`active_time_window=60.0`). Commands starting with `,` bypass buffering.
+
+### Outbound Flow
+
+`ChannelManager` binds itself as the framework's outbound router:
+
+```python
+# manager.py:144
+self.framework.bind_outbound_router(self)
+```
+
+This gives the framework three callback points:
+
+| Callback | Method | Role |
+|---|---|---|
+| `dispatch_output()` | `manager.py:86` | Receives final `Envelope` → wraps in `ChannelMessage` → calls `channel.send()` |
+| `wrap_stream()` | `manager.py:107` | Receives `AsyncStreamEvents` → delegates to `channel.stream_events()` |
+| `quit()` | `manager.py:119` | Cancels all in-flight tasks for a session |
+
+### How the Async Event Stream Is Driven
+
+The stream is **cold** (lazy) until the framework starts iterating. Here is the full mechanical flow:
+
+**1. Agent produces a cold stream**
+
+`Agent.run_stream()` (`builtin/agent.py:110`) returns `AsyncStreamEvents` wrapping an async generator. **No LLM call has happened yet.**
+
+**2. HookRuntime passes the cold stream up**
+
+`HookRuntime.run_model_stream()` → `BuiltinImpl.run_model_stream()` → returns the same cold `AsyncStreamEvents` to `Framework._run_model()`.
+
+**3. Framework wraps with channel observer**
+
+`Framework._run_model()` (`framework.py:164-188`):
+
+```python
+stream = await self._hook_runtime.run_model_stream(...)
+if self._outbound_router is not None:
+    stream = self._outbound_router.wrap_stream(inbound, stream)
+    # └─► ChannelManager.wrap_stream() → channel.stream_events(message, stream)
+async for event in stream:
+    # As we iterate, CLI.stream_events() renders via Rich Live
+    if event.kind == "text":
+        parts.append(str(event.data.get("delta", "")))
+return "".join(parts)
+```
+
+**4. Channel wrapper is an async generator decorator**
+
+`CLI.stream_events()` (`cli/__init__.py:141-160`):
+
+```python
+async def stream_events(self, message, stream):
+    live = None
+    text = ""
+    try:
+        async for event in stream:          # ← pulls from AGENT (triggers LLM)
+            if event.kind == "text":
+                text += str(event.data.get("delta", ""))
+                if live is None:
+                    live = self._renderer.start_stream(...)
+                else:
+                    self._renderer.update_stream(live, ...)
+            yield event                      # ← pushes to FRAMEWORK
+    finally:
+        if live is not None:
+            self._renderer.finish_stream(live, ...)
+```
+
+**Key mechanics:**
+- The wrapper **pulls** from the agent stream, **side-effects** (renders), then **yields** the same event forward.
+- The framework is the **sole consumer**. The channel cannot pause, filter, or short-circuit the stream — it only observes.
+- The `finally` block ensures display cleanup even if the framework stops iterating mid-stream.
+
+**5. Framework assembles final string**
+
+After consuming all events, `Framework._run_model()` returns the assembled string to `process_inbound()`, which builds outbounds via `render_outbound` hook → `dispatch_output` → `channel.send()`.
+
+For CLI, `send()` (`cli/__init__.py:80`) is a no-op for `kind != "error"` because output was already rendered live during stream consumption.
+
+### Design Principles
+
+1. **Channel declares transport policy; manager interprets it.** Channels control `needs_debounce`, `enabled`, and `stream_events`. `ChannelManager` reads these flags but does not override them.
+
+2. **Framework owns stream consumption.** The channel gets an observer wrapper, not the stream itself. This keeps the framework in control of the turn lifecycle.
+
+3. **Stream is cold until framework iterates.** The agent loop, LLM calls, and tool execution only begin when `async for event in stream:` starts. This laziness is essential because `wrap_stream()` must attach before any events fire.
+
+4. **Display and semantics are orthogonal.** `channel.stream_events()` is a display concern (Rich Live). `bub_sf`'s `run_model_stream()` is a semantic concern (System F evaluation). They compose via wrapper chaining.
+
+## Updated Next Steps
+
+1. ✅ **Analyze `TapeService`, `ForkTapeStore`, and `AgentSettings`** — Decision: all stay in `bub`; `Agent` stays in `bub` with `tape_name` API
+2. ✅ **Determine session ownership** — Decision: channel owns `session_id`; framework transports it; builtin/plugin maps it to `tape_name`
+3. **Move refactored `Agent` from `bub_sf` back to `bub`** — port the `tape_name` refactoring to `bub/src/bub/builtin/agent.py`
+4. **Delete `bub_sf/src/bub_sf/agent/`** — remove the vendored agent code
+5. **Update `bub`'s `TapeService`** — change `session_tape()` to `tape()` (or keep both for backward compat during transition)
+6. **Update callers in `bub`** — `hook_impl.py`, `tools.py`, `channels/cli/` to use `tape_name=` instead of `session_id=`
+7. **Extract session→tape mapping utility** — create a stable `_make_tape_name(session_id, workspace)` in `bub.builtin` for reuse by `BuiltinImpl` and future `bub_sf` interceptors
+8. **Verify `bub_sf` hook impl** — ensure it can construct/pass tape names and call `Agent.run()` correctly
+9. **Update System F modeling section** — `Tape` in System F corresponds to `tape_name: str` that bub_sf manages, then passes to bub's Agent
