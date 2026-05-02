@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any, cast
 import uuid
@@ -15,8 +16,10 @@ from bub.hookspecs import hookimpl
 from bub.tools import tool
 from bub.types import Envelope, State
 
+from bub_sf.store.fork_store import SQLiteForkTapeStore
 from bub_sf.bub_ext import BubExt
 from bub_sf.channels.notification import NotificationChannel
+from republic.tape.store import AsyncTapeStore, TapeStore
 from systemf.elab3.repl import REPL
 from systemf.elab3.repl_driver import REPLDriver
 from systemf.elab3.repl_session import REPLSession
@@ -81,7 +84,7 @@ async def sf_repl(input1: str, *rest: str, context: ToolContext) -> str:
     try:
         res = []
         await REPLDriver(session, lines=input_ctnt.splitlines(), output=lambda s: res.append(s)).run()
-        logger.info(f"sf.repl.success res={'\n'.join(res)!r} session_id={session_id}")
+        logger.debug(f"sf.repl.success res={'\n'.join(res)!r} session_id={session_id}")
         return "\n".join(res)
     except Exception as exc:
         logger.exception(f"sf.repl.error expr={input_ctnt!r}", exc_info=exc)
@@ -101,6 +104,7 @@ class SFHookImpl:
 
     framework: BubFramework
     _repl: REPL
+    fork_store: SQLiteForkTapeStore
     _notification_channel: NotificationChannel | None = None
 
     def __init__(self, framework: BubFramework) -> None:
@@ -114,6 +118,10 @@ class SFHookImpl:
             exts=sf_exts
         )
         self._sessions: dict[str, REPLSession] = {}
+        self.fork_store = asyncio.run(self._get_fork_store())
+
+    async def _get_fork_store(self) -> SQLiteForkTapeStore:
+        return  await SQLiteForkTapeStore.create_store(Path("./tape_store.db"))
 
     def get_or_create(self, session_id: str) -> REPLSession:
         if session_id not in self._sessions:
@@ -141,3 +149,13 @@ class SFHookImpl:
         from bub_sf.channels.notification import NotificationChannel
         self._notification_channel = NotificationChannel(on_receive=message_handler)
         return [self._notification_channel]
+
+    @hookimpl
+    def provide_tape_store(self) -> TapeStore | AsyncTapeStore:
+        """Provide a tape store instance for Bub's conversation recording feature."""
+        return self.fork_store
+
+    @hookimpl
+    async def shutdown(self) -> None:
+        """Perform any necessary cleanup when the framework is shutting down."""
+        _ = await self.fork_store.close()

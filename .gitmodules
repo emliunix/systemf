@@ -1,6 +1,6 @@
 [submodule "bub"]
 	path = bub
-	url = https://github.com/bubbuild/bub.git
+	url = https://github.com/emliunix/bub.git
 [submodule "republic"]
 	path = republic
 	url = https://github.com/bubbuild/republic
