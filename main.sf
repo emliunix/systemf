@@ -1,0 +1,16 @@
+import bub
+
+{-# LLM #-}
+prim_op checked_run :: Tape -> String -- ^ intent
+    -> String -- ^ user input
+    -> LLM ()
+
+{-# LLM #-}
+-- | guess the user intent given the user input
+prim_op user_intent :: String -- ^ the user input
+    -> String -- ^ the guessed intent
+
+main :: String -> LLM () = \input ->
+    let intent = user_intent input 
+    in
+        checked_run (current_tape ()) intent input

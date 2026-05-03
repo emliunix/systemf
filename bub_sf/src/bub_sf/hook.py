@@ -47,6 +47,9 @@ module bub
         -> String
 >> test_llm "Hello bub!"
 "Some expanded result" :: String
+
+When you see <function></function>, it means you're in the function context.
+You need to use sf.repl tool to read arguments, and call set_return <value> to return a value.
 """
 
 
@@ -105,20 +108,19 @@ class SFHookImpl:
     framework: BubFramework
     _repl: REPL
     fork_store: SQLiteForkTapeStore
-    _notification_channel: NotificationChannel | None = None
+    # _notification_channel: NotificationChannel | None = None
 
     def __init__(self, framework: BubFramework) -> None:
-        # The module-level @tool already ran when Python imported this module,
-        # so sf.repl is already registered — no extra import needed.
+        store = asyncio.run(self._get_fork_store())
         self.framework = framework
         sf_exts: list[Ext] = []
-        sf_exts.append(BubExt(framework))
+        sf_exts.append(BubExt(store, framework))
         self._repl = REPL(
             search_paths=[str(Path(__file__).parent.resolve())],
             exts=sf_exts
         )
         self._sessions: dict[str, REPLSession] = {}
-        self.fork_store = asyncio.run(self._get_fork_store())
+        self.fork_store = store
 
     async def _get_fork_store(self) -> SQLiteForkTapeStore:
         return  await SQLiteForkTapeStore.create_store(Path("./tape_store.db"))
@@ -134,8 +136,8 @@ class SFHookImpl:
         state: State = {
             "sf_ctx": self,
         }
-        if self._notification_channel is not None:
-            state["notification_channel"] = self._notification_channel
+        # if self._notification_channel is not None:
+        #     state["notification_channel"] = self._notification_channel
         return state
 
     @hookimpl
@@ -143,12 +145,12 @@ class SFHookImpl:
         """Tell the LLM it has a System F REPL available via sf.repl."""
         return SYSTEM_PROMPT
 
-    @hookimpl
-    def provide_channels(self, message_handler) -> list:
-        """Provide the notification channel for async events."""
-        from bub_sf.channels.notification import NotificationChannel
-        self._notification_channel = NotificationChannel(on_receive=message_handler)
-        return [self._notification_channel]
+    # @hookimpl
+    # def provide_channels(self, message_handler) -> list:
+    #     """Provide the notification channel for async events."""
+    #     from bub_sf.channels.notification import NotificationChannel
+    #     self._notification_channel = NotificationChannel(on_receive=message_handler)
+    #     return [self._notification_channel]
 
     @hookimpl
     def provide_tape_store(self) -> TapeStore | AsyncTapeStore:
@@ -158,4 +160,4 @@ class SFHookImpl:
     @hookimpl
     async def shutdown(self) -> None:
         """Perform any necessary cleanup when the framework is shutting down."""
-        _ = await self.fork_store.close()
+        await self.fork_store.close()
