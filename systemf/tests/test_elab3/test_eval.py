@@ -52,8 +52,8 @@ from systemf.elab3.types.val import (
     VLit,
     VClosure,
     VData,
-    VPartial,
 )
+from systemf.elab3.types.vpartial import VPartial
 from systemf.elab3.types.core import (
     CoreLit,
     CoreVar,

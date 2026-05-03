@@ -23,7 +23,8 @@ from .repl_session import REPLSession
 from .types import Module, REPLContext, Name, NameCache
 from .types.protocols import Ext, REPLSessionProto, Synthesizer
 from .types.tything import AnId
-from .types.val import VPartial, Val
+from .types.val import Val
+from .types.vpartial import VPartial
 
 
 class REPL(REPLContext):

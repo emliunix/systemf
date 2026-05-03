@@ -1,7 +1,8 @@
 
 from .types.protocols import TyLookup
 from .types.ty import Ty, TyConApp, subst_ty
-from .types.val import VPrim, Val, Trap, VPartial, VData, VClosure, VLit
+from .types.val import VPrim, Val, Trap, VData, VClosure, VLit
+from .types.vpartial import VPartial
 from .core_extra import lookup_data_con_by_tag
 
 

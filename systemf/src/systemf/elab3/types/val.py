@@ -31,22 +31,6 @@ class VAsync(Val):
 
 
 @dataclass
-class VPartial(Val):
-    """Partially-applied constructor or primop."""
-    name: str
-    arity: int
-    done: list[Val]
-    finish: Callable[[list[Val]], Val]
-
-    @staticmethod
-    def create(name: str, arity: int, finish: Callable[[list[Val]], Val]) -> Val:
-        if arity == 0:
-            return finish([])
-        else:
-            return VPartial(name, arity, [], finish)
-
-
-@dataclass
 class VData(Val):
     """Fully-applied data constructor."""
     tag: int

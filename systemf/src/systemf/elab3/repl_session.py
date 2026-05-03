@@ -14,12 +14,13 @@ from . import pipeline
 from .pipeline import Code
 from . import builtins as bi
 from .name_gen import NameGeneratorImpl, check_dups
-from .reader_env import ImportSpec, ReaderEnv, ImportRdrElt, QualName
+from .reader_env import ImportSpec, RdrName, ReaderEnv, ImportRdrElt, QualName
 from .eval import Evaluator, EvalCtx
 from .types import Module, TyThing, REPLContext, Name
 from .types.ty import Id, Ty, TyConApp, TyFun
 from .types.tything import ACon, AnId, tything_name
-from .types.val import VData, VPartial, Val
+from .types.val import VData, Val
+from .types.vpartial import VPartial
 
 
 class REPLSession(EvalCtx, REPLSessionProto):
@@ -62,6 +63,9 @@ class REPLSession(EvalCtx, REPLSessionProto):
     @property
     def state(self) -> dict[str, Any]:
         return self._state
+    
+    def clear_state(self):
+        self._state = {}
 
     def fork(self) -> REPLSession:
         """
@@ -155,6 +159,19 @@ class REPLSession(EvalCtx, REPLSessionProto):
     @override
     def core_extra(self) -> CoreBuilderExtra:
         return self._core_extra
+    
+    def get_session(self) -> REPLSessionProto | None:
+        return self
+    
+    def resolve_name(self, occ: RdrName) -> Name:
+        names = self.reader_env.lookup(occ)
+        match names:
+            case [ImportRdrElt(name=name)]:
+                return name
+            case []:
+                raise Exception(f"Name {occ} not found")
+            case _:
+                raise Exception(f"Ambiguous name {occ}: {names}")
 
     def lookup(self, name: Name) -> TyThing:
         # REPL Session is like a special module, check first.
@@ -272,10 +289,14 @@ def mk_mod_inst(mod: Module, get_primop: Callable[[Name, AnId], Val]) -> dict[Na
             case ACon(name=con_name, tag=tag, arity=arity):
                 mod_inst[name] = VPartial.create(
                     con_name.surface, arity,
-                    # Capture tag by value in the lambda to avoid closure bug
-                    lambda args, tag=tag: VData(tag, args),
+                    _mk_data(tag),
                 )
             case AnId(name=name, is_prim=True):
                 mod_inst[name] = get_primop(name, thing)
             case _: pass
     return mod_inst
+
+def _mk_data(tag: int) -> Callable[[list[Val]], Val]:
+    def _con(args: list[Val]) -> Val:
+        return VData(tag, args)
+    return _con

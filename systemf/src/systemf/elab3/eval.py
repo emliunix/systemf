@@ -21,10 +21,11 @@ from systemf.elab3.types.core import (
     NonRec, Rec,
     DataAlt, LitAlt, DefaultAlt, Alt,
 )
+from systemf.elab3.types.protocols import REPLSessionProto
 from .types.ty import Id, Name
 from .types.mod import Module
-from .types.val import VAsync, Val, VLit, VClosure, VPartial, VData, Trap, Env
-
+from .types.val import VAsync, Val, VLit, VClosure, VData, Trap, Env
+from .types.vpartial import SessionAwareFinish, VPartial
 
 
 # =============================================================================
@@ -99,6 +100,7 @@ class EvalCtx(Protocol):
     async def lookup_gbl(self, name: Name) -> Val: ...
     @property
     def core_extra(self) -> CoreBuilderExtra: ...
+    def get_session(self) -> REPLSessionProto | None: ...
 
 
 # =============================================================================
@@ -244,8 +246,12 @@ class Evaluator:
                     case VPartial(name=name, arity=arity, done=done, finish=finish):
                         new_done = done + [v]
                         if arity == len(new_done):
+                            if isinstance(finish, SessionAwareFinish):
+                                res = finish(new_done, session=self.ctx.get_session())
+                            else:
+                                res = finish(new_done) 
                             # VPartial apply is the only place where VAsync can appear
-                            return await self.call_continue(await unasync(finish(new_done)), k2)
+                            return await self.call_continue(await unasync(res), k2)
                         else:
                             return await self.call_continue(
                                 VPartial(name, arity, new_done, finish), k2

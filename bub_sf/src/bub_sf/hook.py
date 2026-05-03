@@ -19,11 +19,19 @@ from bub.types import Envelope, State
 from bub_sf.store.fork_store import SQLiteForkTapeStore
 from bub_sf.bub_ext import BubExt
 from bub_sf.channels.notification import NotificationChannel
+from republic.core.results import AsyncStreamEvents
+from republic.tape import session
 from republic.tape.store import AsyncTapeStore, TapeStore
+from systemf.elab3.reader_env import QualName
 from systemf.elab3.repl import REPL
 from systemf.elab3.repl_driver import REPLDriver
 from systemf.elab3.repl_session import REPLSession
+from systemf.elab3.types.ast import ImportDecl
+from systemf.elab3.types.core import C
 from systemf.elab3.types.protocols import Ext
+from systemf.elab3.types.ty import Id, LitString, TyFun
+from systemf.elab3.types.tything import AnId
+from systemf.elab3.types.val import VPrim
 from systemf.elab3.val_pp import pp_val
 
 
@@ -48,8 +56,9 @@ module bub
 >> test_llm "Hello bub!"
 "Some expanded result" :: String
 
-When you see <function></function>, it means you're in the function context.
-You need to use sf.repl tool to read arguments, and call set_return <value> to return a value.
+When you see <funcall></funcall>, it means you're in a function call context.
+You should use sf.repl tool to read arguments.
+If it has a return type, you should call set_return <value> to return a value.
 """
 
 
@@ -68,21 +77,18 @@ You need to use sf.repl tool to read arguments, and call set_return <value> to r
 )
 async def sf_repl(input1: str, *rest: str, context: ToolContext) -> str:
     input_ctnt = " ".join((input1, *rest))
-    logger.debug(f"sf.repl expr={input_ctnt!r} session_id={context.state.get('session_id')}")
+    session_id = context.state.get("session_id", "unknown")
+    logger.debug(f"sf.repl expr={input_ctnt!r} session_id={session_id}")
 
     sf_hook: SFHookImpl | None = context.state.get("sf_ctx")
+    if sf_hook is None:
+        raise Exception("sf.repl requires sf_ctx in state")
 
     # session is either created for root or preset for nested calls
-    session_id: str | None = context.state.get("session_id")
     session: REPLSession | None = context.state.get("sf_session")
-    if session is None and sf_hook and session_id:
-        session = sf_hook.get_or_create(session_id)
-        # forward the whole state
-        session.state.update(context.state)
-        context.state["sf_session"] = session
     if session is None:
-        logger.warning(f"sf.repl.no_session session_id={session_id}")
-        return "Error: no REPL session attached to this conversation"
+        session = await sf_hook.get_or_create(session_id or "temp/unknown")
+    session.state["bub_state"] = context.state
 
     try:
         res = []
@@ -125,9 +131,11 @@ class SFHookImpl:
     async def _get_fork_store(self) -> SQLiteForkTapeStore:
         return  await SQLiteForkTapeStore.create_store(Path("./tape_store.db"))
 
-    def get_or_create(self, session_id: str) -> REPLSession:
+    async def get_or_create(self, session_id: str) -> REPLSession:
         if session_id not in self._sessions:
-            self._sessions[session_id] = self._repl.new_session()
+            session = self._repl.new_session()
+            _init_session(session)
+            self._sessions[session_id] = session
         return self._sessions[session_id]
 
     @hookimpl
@@ -135,10 +143,31 @@ class SFHookImpl:
         """Populate state with a persistent REPLSession for this conversation."""
         state: State = {
             "sf_ctx": self,
+            "sf_session": await self.get_or_create(session_id),
         }
         # if self._notification_channel is not None:
         #     state["notification_channel"] = self._notification_channel
         return state
+    
+    @hookimpl
+    async def run_model_stream(self, prompt: str | list[dict], session_id: str, state: State) -> AsyncStreamEvents:
+        """execute main.main systemf program"""
+
+        if not isinstance(prompt, str):
+            raise Exception("Only string prompt is supported for now")
+
+        repl = await self.get_or_create(session_id)
+        repl.state["bub_state"] = state
+        # eval: main prompt
+        main = repl.lookup(repl.resolve_name(QualName("main", "main")))
+        if not isinstance(main, AnId):
+            raise Exception("main.main is not an Id")
+        res = await repl.unsafe_eval(C.app(C.var(main.id), C.lit(LitString(prompt))))
+        match res:
+            case VPrim([AsyncStreamEvents() as events, _]):
+                return events
+            case _:
+                raise Exception(f"Expected AsyncStreamEvents from main.main, got {res}")
 
     @hookimpl
     def system_prompt(self, prompt: str | list[dict], state: State) -> str:
@@ -161,3 +190,8 @@ class SFHookImpl:
     async def shutdown(self) -> None:
         """Perform any necessary cleanup when the framework is shutting down."""
         await self.fork_store.close()
+
+
+def _init_session(session: REPLSession) -> None:
+    """Initialize a REPLSession with any necessary setup."""
+    session.add_import(ImportDecl(module="main"))
