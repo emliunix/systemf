@@ -138,21 +138,21 @@ class CoreOps:
         self._conn = conn
 
     async def _get_tape_id(self, tape_name: str) -> int | None:
-        async with await self._conn.execute(
+        async with self._conn.execute(
             "SELECT id FROM tapes WHERE name = ?", (tape_name,)
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else None
 
     async def _get_or_create_tape(self, tape_name: str) -> tuple[int, int]:
-        async with await self._conn.execute(
+        async with self._conn.execute(
             "SELECT id, next_entry_id FROM tapes WHERE name = ?", (tape_name,)
         ) as cursor:
             row = await cursor.fetchone()
             if row:
                 return row[0], row[1]
 
-        async with await self._conn.execute(
+        async with self._conn.execute(
             "INSERT INTO tapes (name, next_entry_id) VALUES (?, 0)",
             (tape_name,),
         ) as cursor:
@@ -176,7 +176,7 @@ class CoreOps:
 
         if entry.kind == "anchor":
             anchor_name = entry.payload["name"]
-            async with await self._conn.execute(
+            async with self._conn.execute(
                 """
                 SELECT 1 FROM merged_anchors
                 WHERE leaf_tape_id = ? AND anchor_name = ?
@@ -231,7 +231,7 @@ class CoreOps:
 
     async def fork(self, source_name: str, entry_id: int, target_name: str) -> None:
         """Fork source tape at the given entry_id."""
-        async with await self._conn.execute(
+        async with self._conn.execute(
             "SELECT id, next_entry_id FROM tapes WHERE name = ?",
             (source_name,),
         ) as cursor:
@@ -282,7 +282,7 @@ class BuildQueryImpl(BuildQuery):
 
         # Use a single query with IN clause for efficiency
         placeholders = ",".join("?" for _ in names)
-        async with await self._conn.execute(
+        async with self._conn.execute(
             f"""
             SELECT anchor_name, entry_id
             FROM merged_anchors
@@ -305,7 +305,7 @@ class BuildQueryImpl(BuildQuery):
     @override
     async def last_anchor(self, tape_id: int) -> int | None:
         """Return the last anchor as entry_id or None."""
-        async with await self._conn.execute(
+        async with self._conn.execute(
             """
             SELECT entry_id
             FROM merged_anchors
@@ -431,7 +431,7 @@ class SQLiteForkTapeStore(AsyncTapeStore):
         if tape_id is None:
             return None
 
-        async with await self._conn.execute(
+        async with self._conn.execute(
             f"""
             SELECT {TAPE_FIELDS}
             FROM merged_entries
@@ -464,7 +464,7 @@ class SQLiteForkTapeStore(AsyncTapeStore):
                     sql = sql + "\nLIMIT ?"
                     params = params_ + [limit]
 
-                async with await conn.execute(sql, params) as cursor:
+                async with conn.execute(sql, params) as cursor:
                     entries: list[TapeEntry] = []
                     async for row in cursor:
                         entries.append(_tape_entry(row))
@@ -475,7 +475,7 @@ class SQLiteForkTapeStore(AsyncTapeStore):
         return await _go()
 
     async def list_tapes(self) -> list[str]:
-        async with await self._conn.execute("SELECT name FROM tapes ORDER BY name") as cursor:
+        async with self._conn.execute("SELECT name FROM tapes ORDER BY name") as cursor:
             return [row[0] async for row in cursor]
         
     @asynccontextmanager
