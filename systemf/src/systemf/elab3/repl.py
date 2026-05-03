@@ -26,7 +26,7 @@ from .types.tything import AnId
 from .types.val import VData, VPartial, Val
 
 
-class REPL(REPLContext, Synthesizer):
+class REPL(REPLContext):
     """Owns shared state, creates sessions, orchestrates module loading.
 
     Contains NameCache which wraps the Uniq counter for generating unique IDs.
@@ -56,6 +56,7 @@ class REPL(REPLContext, Synthesizer):
         }
         nonmod_synths: list[Synthesizer] = []
         paths = search_paths and search_paths[:] or []
+        # for ../builtins.sf
         paths.extend([".", str(Path(__file__).parent.parent)])
         for ext in self.exts:
             for synth in ext.synthesizers() or []:
@@ -84,10 +85,6 @@ class REPL(REPLContext, Synthesizer):
     @override
     def load(self, name: str) -> Module:
         return self._load(name, None)
-
-    @override
-    def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None:
-        return self.ops_synther.get_primop(name, thing, session)
 
     def _load(self, name: str, from_mod: str | None = None) -> Module:
         """

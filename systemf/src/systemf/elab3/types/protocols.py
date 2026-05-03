@@ -28,6 +28,7 @@ class TyLookup(Protocol):
 class REPLContext(Protocol):
     uniq: Uniq
     name_cache: NameCache
+    ops_synther: Synthesizer
 
     def load(self, name: str) -> Module: ...
     def next_replmod_id(self) -> int: ...

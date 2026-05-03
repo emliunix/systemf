@@ -22,13 +22,9 @@ from .types.tything import ACon, AnId, tything_name
 from .types.val import VData, VPartial, Val
 
 
-class REPLContextExt(REPLContext, Synthesizer, Protocol):
-    pass
-
-
 class REPLSession(EvalCtx, REPLSessionProto):
     """Accumulates imports and bindings. Corresponds to InteractiveContext."""
-    ctx: REPLContextExt
+    ctx: REPLContext
     repl_rdr_env: ReaderEnv               # repl items
     imports_rdr_env: ReaderEnv            # mod imports
     reader_env: ReaderEnv                 # cached merged reader_env of the above 2
@@ -44,7 +40,7 @@ class REPLSession(EvalCtx, REPLSessionProto):
     _evaling: list[str]                   # Modules currently being evaluated (for cycle detection)
     _evaluator: Evaluator
 
-    def __init__(self, ctx: REPLContextExt,
+    def __init__(self, ctx: REPLContext,
                 repl_rdr_env: ReaderEnv,
                 tythings: list[TyThing],
                 mod_insts: dict[str, dict[Name, Val]],
@@ -227,7 +223,7 @@ class REPLSession(EvalCtx, REPLSessionProto):
         return NameGeneratorImpl(mod_name, self.ctx.uniq)
 
     def mk_primop(self, name: Name, thing: AnId) -> Val:
-        if (p := self.ctx.get_primop(name, thing, self)) is not None:
+        if (p := self.ctx.ops_synther.get_primop(name, thing, self)) is not None:
             return p
         raise Exception(f"Unknown primitive operation: {name}")
 
