@@ -302,6 +302,7 @@ class BuildQueryImpl(BuildQuery):
         # Return in original order, preserving size
         return [lookup.get(name) for name in names]
 
+    @override
     async def last_anchor(self, tape_id: int) -> int | None:
         """Return the last anchor as entry_id or None."""
         async with await self._conn.execute(
@@ -319,7 +320,8 @@ class BuildQueryImpl(BuildQuery):
                 return None
         # For simplicity, return entry_id only - tape_id not needed for query
         return row[0]
-    
+
+    @override
     async def tape_id(self, tape_name: str) -> int | None:
         return await self._ops._get_tape_id(tape_name)
 
@@ -396,6 +398,31 @@ class SQLiteForkTapeStore(AsyncTapeStore):
             async with self._tranx() as _:
                 await self._core.fork(source_name, entry_id, target_name)
         return await _go()
+    
+    async def fork_tape(self, source_name: str, target_name: str) -> None:
+        """Fork a tape at the last entry."""
+        @_unwrap_e
+        async def _go():
+            async with self._tranx() as _:
+                source_tape_id = await self._core._get_tape_id(source_name)
+                if source_tape_id is None:
+                    raise _E(RepublicError(ErrorKind.NOT_FOUND, f"Source tape '{source_name}' does not exist"))
+                
+
+                async with self._conn.execute("""
+                        SELECT {TAPE_FIELDS}
+                        FROM merged_entries
+                        WHERE leaf_tape_id = ?
+                        ORDER BY DEPTH, entry_id DESC
+                        LIMIT 1
+                        """, (source_tape_id,)) as cursor:
+                    row = await cursor.fetchone()
+                    if row is None:
+                        raise _E(RepublicError(ErrorKind.INVALID_INPUT, f"Source tape '{source_name}' has no entries to fork from"))
+                    last_entry = _tape_entry(row)
+
+                await self._core.fork(source_name, last_entry.id, target_name)
+        return await _go()
 
     # -- Read operations --
 
@@ -436,7 +463,6 @@ class SQLiteForkTapeStore(AsyncTapeStore):
                 if limit is not None:
                     sql = sql + "\nLIMIT ?"
                     params = params_ + [limit]
-
 
                 async with await conn.execute(sql, params) as cursor:
                     entries: list[TapeEntry] = []
