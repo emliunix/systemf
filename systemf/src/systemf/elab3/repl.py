@@ -23,7 +23,7 @@ from .repl_session import REPLSession
 from .types import Module, REPLContext, Name, NameCache
 from .types.protocols import Ext, REPLSessionProto, Synthesizer
 from .types.tything import AnId
-from .types.val import VData, VPartial, Val
+from .types.val import VPartial, Val
 
 
 class REPL(REPLContext):
@@ -130,11 +130,6 @@ class REPL(REPLContext):
 def _builtins_primops() -> dict[str, Val]:
     """Build the primop cache. Called once at REPL init."""
 
-    # FIX: this is hacky, but we need rename phase of bulitins to get the tags assigned
-    # so we just hardcode what will be assigned
-    true_val = VData(0, [])
-    false_val = VData(1, [])
-
     builtins: dict[str, Val] = {}
 
     def _reg(surface: str, arity: int, func):
@@ -144,12 +139,12 @@ def _builtins_primops() -> dict[str, Val]:
     _reg(bi.BUILTIN_INT_MINUS.surface, 2, rts.int_minus)
     _reg(bi.BUILTIN_INT_MULTIPLY.surface, 2, rts.int_multiply)
     _reg(bi.BUILTIN_INT_DIVIDE.surface, 2, rts.int_divide)
-    _reg(bi.BUILTIN_INT_EQ.surface, 2, rts.mk_int_eq(true_val, false_val))
-    _reg(bi.BUILTIN_INT_NEQ.surface, 2, rts.mk_int_neq(true_val, false_val))
-    _reg(bi.BUILTIN_INT_LT.surface, 2, rts.mk_int_lt(true_val, false_val))
-    _reg(bi.BUILTIN_INT_GT.surface, 2, rts.mk_int_gt(true_val, false_val))
-    _reg(bi.BUILTIN_INT_LE.surface, 2, rts.mk_int_le(true_val, false_val))
-    _reg(bi.BUILTIN_INT_GE.surface, 2, rts.mk_int_ge(true_val, false_val))
+    _reg(bi.BUILTIN_INT_EQ.surface, 2, rts.int_eq)
+    _reg(bi.BUILTIN_INT_NEQ.surface, 2, rts.int_neq)
+    _reg(bi.BUILTIN_INT_LT.surface, 2, rts.int_lt)
+    _reg(bi.BUILTIN_INT_GT.surface, 2, rts.int_gt)
+    _reg(bi.BUILTIN_INT_LE.surface, 2, rts.int_le)
+    _reg(bi.BUILTIN_INT_GE.surface, 2, rts.int_ge)
     _reg(bi.BUILTIN_STRING_CONCAT.surface, 2, rts.string_concat)
     _reg(bi.BUILTIN_ERROR.surface, 1, rts.error)
     _reg(bi.BUILTIN_MK_REF.surface, 1, rts.mk_ref)

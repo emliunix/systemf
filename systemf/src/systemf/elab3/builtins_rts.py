@@ -8,7 +8,7 @@ Bool (``&&``, ``||``, ``not``) are NOT primops — they are regular
 SystemF functions defined in ``builtins.sf`` using ``case``.
 """
 
-from typing import Callable, cast
+from typing import cast
 
 from .types.val import VLit, VPrim, Val
 from .types.ty import LitInt, LitString
@@ -16,47 +16,45 @@ from .types.ty import LitInt, LitString
 from . import builtins as bi
 
 
-# --- helpers ---
-
-def _expect_int(v: Val) -> int:
-    match v:
-        case VLit(lit=LitInt(value=n)):
-            return n
-    raise Exception(f"expected int, got {v}")
-
-
-def _expect_string(v: Val) -> str:
-    match v:
-        case VLit(lit=LitString(value=s)):
-            return s
-    raise Exception(f"expected string, got {v}")
-
-
 # --- primop implementations (pure computation, no constructors) ---
+
+# The typechecker guarantees argument types, so we cast rather than
+# defensively match.
+
 
 def int_plus(args: list[Val]) -> Val:
     a, b = args
-    return VLit(LitInt(_expect_int(a) + _expect_int(b)))
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return VLit(LitInt(x + y))
 
 
 def int_minus(args: list[Val]) -> Val:
     a, b = args
-    return VLit(LitInt(_expect_int(a) - _expect_int(b)))
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return VLit(LitInt(x - y))
 
 
 def int_multiply(args: list[Val]) -> Val:
     a, b = args
-    return VLit(LitInt(_expect_int(a) * _expect_int(b)))
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return VLit(LitInt(x * y))
 
 
 def int_divide(args: list[Val]) -> Val:
     a, b = args
-    return VLit(LitInt(_expect_int(a) // _expect_int(b)))
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return VLit(LitInt(x // y))
 
 
 def string_concat(args: list[Val]) -> Val:
     a, b = args
-    return VLit(LitString(_expect_string(a) + _expect_string(b)))
+    s = cast(LitString, cast(VLit, a).lit).value
+    t = cast(LitString, cast(VLit, b).lit).value
+    return VLit(LitString(s + t))
 
 
 def error(args: list[Val]) -> Val:
@@ -87,45 +85,49 @@ def mk_ref(args: list[Val]) -> Val:
     return VPrim([initial])
 
 
-# --- int-relational primops (return True/False, received from caller) ---
+# --- int-relational primops ---
 
-def mk_int_eq(true_val: Val, false_val: Val) -> Callable[[list[Val]], Val]:
-    def _int_eq(args: list[Val]) -> Val:
-        a, b = args
-        return true_val if _expect_int(a) == _expect_int(b) else false_val
-    return _int_eq
+# TRUE_VAL / FALSE_VAL are defined in builtins.py; the typechecker
+# guarantees these are only called with Int arguments.
 
 
-def mk_int_neq(true_val: Val, false_val: Val) -> Callable[[list[Val]], Val]:
-    def _int_neq(args: list[Val]) -> Val:
-        a, b = args
-        return true_val if _expect_int(a) != _expect_int(b) else false_val
-    return _int_neq
+def int_eq(args: list[Val]) -> Val:
+    a, b = args
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return bi.TRUE_VAL if x == y else bi.FALSE_VAL
 
 
-def mk_int_lt(true_val: Val, false_val: Val) -> Callable[[list[Val]], Val]:
-    def _int_lt(args: list[Val]) -> Val:
-        a, b = args
-        return true_val if _expect_int(a) < _expect_int(b) else false_val
-    return _int_lt
+def int_neq(args: list[Val]) -> Val:
+    a, b = args
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return bi.TRUE_VAL if x != y else bi.FALSE_VAL
 
 
-def mk_int_gt(true_val: Val, false_val: Val) -> Callable[[list[Val]], Val]:
-    def _int_gt(args: list[Val]) -> Val:
-        a, b = args
-        return true_val if _expect_int(a) > _expect_int(b) else false_val
-    return _int_gt
+def int_lt(args: list[Val]) -> Val:
+    a, b = args
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return bi.TRUE_VAL if x < y else bi.FALSE_VAL
 
 
-def mk_int_le(true_val: Val, false_val: Val) -> Callable[[list[Val]], Val]:
-    def _int_le(args: list[Val]) -> Val:
-        a, b = args
-        return true_val if _expect_int(a) <= _expect_int(b) else false_val
-    return _int_le
+def int_gt(args: list[Val]) -> Val:
+    a, b = args
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return bi.TRUE_VAL if x > y else bi.FALSE_VAL
 
 
-def mk_int_ge(true_val: Val, false_val: Val) -> Callable[[list[Val]], Val]:
-    def _int_ge(args: list[Val]) -> Val:
-        a, b = args
-        return true_val if _expect_int(a) >= _expect_int(b) else false_val
-    return _int_ge
+def int_le(args: list[Val]) -> Val:
+    a, b = args
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return bi.TRUE_VAL if x <= y else bi.FALSE_VAL
+
+
+def int_ge(args: list[Val]) -> Val:
+    a, b = args
+    x = cast(LitInt, cast(VLit, a).lit).value
+    y = cast(LitInt, cast(VLit, b).lit).value
+    return bi.TRUE_VAL if x >= y else bi.FALSE_VAL
