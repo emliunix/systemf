@@ -467,6 +467,32 @@ class TestQueryFiltering:
         )
         assert [e.id for e in result] == [2]
 
+    @pytest.mark.asyncio
+    async def test_fetch_all_order_on_forked_tape(self, store):
+        """fetch_all returns entries in chronological order across forks."""
+        await store.append("parent", make_entry(0))
+        await store.append("parent", make_entry(1))
+        parent_entries = await store.read("parent")
+        await store.fork("parent", parent_entries[-1].id, "child")
+        await store.append("child", make_entry(2))
+        await store.append("child", make_entry(3))
+
+        result = await store.fetch_all(TapeQuery(tape="child", store=store))
+        assert [e.id for e in result] == [0, 1, 2, 3]
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_limit_on_forked_tape(self, store):
+        """fetch_all limit truncates from the latest end on forked tapes."""
+        await store.append("parent", make_entry(0))
+        await store.append("parent", make_entry(1))
+        parent_entries = await store.read("parent")
+        await store.fork("parent", parent_entries[-1].id, "child")
+        await store.append("child", make_entry(2))
+        await store.append("child", make_entry(3))
+
+        result = await store.fetch_all(TapeQuery(tape="child", store=store).limit(2))
+        assert [e.id for e in result] == [0, 1]
+
 
 # ---------------------------------------------------------------------------
 # Anchor-specific tests
