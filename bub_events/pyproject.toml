@@ -1,0 +1,38 @@
+[project]
+name = "bub-events"
+version = "0.1.0"
+description = "Event-driven channel for Bub framework"
+readme = "README.md"
+authors = [
+    { name = "emliunix", email = "emliunix@hotmail.com" }
+]
+requires-python = ">=3.14, <4.0"
+dependencies = [
+    "bub",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+]
+
+[project.entry-points.bub]
+events = "bub_events.hook:EventsHookImpl"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.25.0",
+    "httpx>=0.28.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest-asyncio>=1.3.0",
+]
