@@ -1,18 +1,18 @@
-import contextvars
-from dataclasses import dataclass
 import uuid
 
 from os import path
 from typing import Any, cast, override
 from collections.abc import Callable, Generator
+from dataclasses import dataclass
 
+from loguru import logger
 from bub.builtin.agent import Agent
 from bub.builtin.tape import get_tape_name
 from bub.framework import BubFramework
-from bub_sf.store.fork_store import SQLiteForkTapeStore
 from republic.core.results import AsyncStreamEvents
+
+from bub_sf.store.fork_store import SQLiteForkTapeStore
 from systemf.elab3 import builtins as bi
-from systemf.elab3.pp_tything import pp_tything
 from systemf.elab3.val_pp import pp_val
 from systemf.elab3.types.protocols import Ext, REPLSessionProto, Synthesizer
 from systemf.elab3.types.ty import LitString, Name, Ty, TyConApp, TyForall, TyFun, TyString
@@ -20,10 +20,9 @@ from systemf.elab3.types.tything import AnId
 from systemf.elab3.types.val import VAsync, VData, VLit, VPrim, Val
 from systemf.elab3.types.vpartial import VPartial, SessionAwareFinish
 
-current_state = contextvars.ContextVar("state", default=cast(dict[str, Any], {}))
-
 
 class BubExt(Ext):
+    store: SQLiteForkTapeStore
     framework: BubFramework
 
     def __init__(self, store: SQLiteForkTapeStore, framework: BubFramework) -> None:
@@ -90,12 +89,13 @@ class LLMOps(Synthesizer):
         match_res = _match_llm_funty(thing.id.ty, session)
 
         async def _fun(args: list[Val], session: REPLSessionProto | None) -> Val:
+            logger.info(f"LLM function call: {name.mod}.{name.surface}")
             if session is None:
                 raise Exception("LLM primops must be called with a valid session")
-            state = session.state["bub_state"]
+            session_id = session.state["bub_state"]["session_id"] or "unknown"
             # NOTE: temp/ prefix suppress merge_back
             # NOTE: tape is either temp or explicitly speicfied in args
-            tape_name = _tape_name(match_res, args) or f"{state['session_id'] or 'unknown'}/temp-{uuid.uuid4().hex[:8]}"
+            tape_name = _tape_name(match_res, args) or f"{session_id}/temp-{uuid.uuid4().hex[:8]}"
 
             doc = thing.metas.doc if thing.metas else None
 
@@ -105,9 +105,8 @@ class LLMOps(Synthesizer):
             )
             res_ty = match_res.res_ty
 
-            # TODO: insert res_doc to prompt
             # TODO: metas.arg_docs is misleading, res_doc is its last element
-            arg_docs = []
+            arg_docs: list[str | None] = []
             res_doc = None
             if thing.metas:
                 arg_docs.extend(thing.metas.arg_docs[:-1])
@@ -198,26 +197,21 @@ def _build_func_prompt(name: Name, doc: str | None, args: list[tuple[str, Ty, st
         else:
             return f"""<arg name="{name}" type="{arg_ty}" />"""
 
-    arg_strs = [
-        _build_arg(arg_name, arg_ty, doc)
-        for arg_name, arg_ty, doc in args
-    ]
-    func_doc_info = f"""<doc>{doc}</doc>""" if doc else ""
-    if _is_unit(res_ty):
-        return_info = ""
-    elif res_doc:
-        return_info = f"""<return type="{res_ty}"><doc>{res_doc}</doc></return>"""
-    else:
-        return_info = f"""<return type="{res_ty}" />"""
-    return f"""
-<funcall mod="{name.mod}" source="{name.loc}" name="{name.surface}">
-{func_doc_info}
-<args>
-{'\n'.join(arg_strs)}
-</args>
-{return_info}
-</funcall>
-"""
+    def _lines() -> Generator[str, None, None]:
+        yield f"""<funcall mod="{name.mod}" source="{name.loc}" name="{name.surface}">"""
+        if doc:
+            yield f"<doc>{doc}</doc>"
+        if args:
+            yield "<args>"
+            for arg_name, arg_ty, arg_doc in args:
+                yield _build_arg(arg_name, arg_ty, arg_doc)
+            yield "</args>"
+        if res_doc:
+            yield f"""<return type="{res_ty}"><doc>{res_doc}</doc></return>"""
+        elif not _is_unit(res_ty):
+            yield f"""<return type="{res_ty}" />"""
+        yield "</funcall>"
+    return "\n".join(list(_lines()))
 
 
 def _pp_nonfunc_val(session: REPLSessionProto, name: str, val: Val, ty: Ty, doc: str | None) -> str:
@@ -252,6 +246,7 @@ def _match_tape_ty(ty: Ty, session: REPLSessionProto) -> bool:
             return True
         case _:
             return False
+
 
 @dataclass
 class MatchLLMResult:

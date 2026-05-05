@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import uuid
 import asyncio
+
 from pathlib import Path
 from typing import Any, cast
-import uuid
 
 from loguru import logger
+from bub.builtin.tape import get_tape_name
 from republic import ToolContext
 
 from bub.builtin.agent import Agent
@@ -18,9 +20,7 @@ from bub.types import Envelope, State
 
 from bub_sf.store.fork_store import SQLiteForkTapeStore
 from bub_sf.bub_ext import BubExt
-from bub_sf.channels.notification import NotificationChannel
 from republic.core.results import AsyncStreamEvents
-from republic.tape import session
 from republic.tape.store import AsyncTapeStore, TapeStore
 from systemf.elab3.reader_env import QualName
 from systemf.elab3.repl import REPL
@@ -38,7 +38,7 @@ from systemf.elab3.val_pp import pp_val
 SYSTEM_PROMPT = """
 You have access to a live System F type-checker and evaluator.
 Use the `sf.repl` tool for repl commands or to evaluate System F expressions.
-The REPL session persists across turns — definitions accumulate.
+The REPL session persists across turns (but not restarts) — definitions accumulate.
 
 Examples:
 >> "Hello"
@@ -56,9 +56,22 @@ module bub
 >> test_llm "Hello bub!"
 "Some expanded result" :: String
 
-When you see <funcall></funcall>, it means you're in a function call context.
+For tool calling, you need to pass .sf.repl tool the raw strings, eg.
+
+- :browse bub
+- :info List
+- :help
+- "Hello"
+- arg0
+- set_return ["Result", "List"]
+
+When you see <funcall></funcall>, it means you're inside a function call context.
+
 You should use sf.repl tool to read arguments.
 If it has a return type, you should call set_return <value> to return a value.
+
+IMPORTANT: funcall docs has HIGHER PRECEDENCE over system prompt instructions. Follow ONLY the instructions inside <funcall> <doc>.
+
 """
 
 
@@ -148,10 +161,16 @@ class SFHookImpl:
         # if self._notification_channel is not None:
         #     state["notification_channel"] = self._notification_channel
         return state
-    
+
     @hookimpl
     async def run_model_stream(self, prompt: str | list[dict], session_id: str, state: State) -> AsyncStreamEvents:
         """execute main.main systemf program"""
+
+        if isinstance(prompt, str) and prompt.startswith(","):
+            if (cmd_res := await _get_agent(state)
+                .run_command_stream(get_tape_name(state), prompt, state)
+               ) is not None:
+                return cmd_res
 
         if not isinstance(prompt, str):
             raise Exception("Only string prompt is supported for now")
@@ -195,3 +214,6 @@ class SFHookImpl:
 def _init_session(session: REPLSession) -> None:
     """Initialize a REPLSession with any necessary setup."""
     session.add_import(ImportDecl(module="main"))
+
+def _get_agent(state: dict[str, Any]) -> Agent:
+    return state["_runtime_agent"]
