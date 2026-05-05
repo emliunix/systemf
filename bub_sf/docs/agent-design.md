@@ -861,15 +861,31 @@ After consuming all events, `Framework._run_model()` returns the assembled strin
 
 For CLI, `send()` (`cli/__init__.py:80`) is a no-op for `kind != "error"` because output was already rendered live during stream consumption.
 
+## Layered Turn Architecture
+
+Every turn follows three layers:
+
+1. **Setup** — determine tape and session (handled by `load_state` / `get_tape_name`)
+2. **Command processing** — if prompt starts with `,`, execute as command
+3. **Agent call** — only if not a command, invoke the agent loop or SystemF `main`
+
+**Design decision:** Extract command execution into two probed module-level functions with `| None` return type.
+
+- `run_command(tape, prompt) -> str | None` — executes `,`-prefixed commands, returns `None` if not a command
+- `run_command_stream(tape, prompt) -> AsyncStreamEvents | None` — streaming variant, wraps result in synthetic stream
+
+`Agent` facade delegates to these functions before falling through to the agent loop. `bub_sf` can call them directly without constructing `Agent`.
+
+See refined proposal: `analysis/COMMAND_FUNCTIONS_EXTRACTION.md`
+
+**Command loss issue:** When `bub_sf` intercepts `run_model_stream`, it currently skips step 2. See exploration: `analysis/COMMAND_EXECUTION_LOST_EXPLORATION.md`
+
 ### Design Principles
 
-1. **Channel declares transport policy; manager interprets it.** Channels control `needs_debounce`, `enabled`, and `stream_events`. `ChannelManager` reads these flags but does not override them.
-
-2. **Framework owns stream consumption.** The channel gets an observer wrapper, not the stream itself. This keeps the framework in control of the turn lifecycle.
-
-3. **Stream is cold until framework iterates.** The agent loop, LLM calls, and tool execution only begin when `async for event in stream:` starts. This laziness is essential because `wrap_stream()` must attach before any events fire.
-
-4. **Display and semantics are orthogonal.** `channel.stream_events()` is a display concern (Rich Live). `bub_sf`'s `run_model_stream()` is a semantic concern (System F evaluation). They compose via wrapper chaining.
+1. **Channel declares transport policy; manager interprets it.**
+2. **Framework owns stream consumption.**
+3. **Stream is cold until framework iterates.**
+4. **Display and semantics are orthogonal.**
 
 ## Updated Next Steps
 
