@@ -58,9 +58,9 @@ module bub
 
 For tool calling, you need to pass .sf.repl tool the raw strings, eg.
 
-- :browse bub
-- :info List
 - :help
+- :browse bub
+- :info Maybe
 - "Hello"
 - arg0
 - set_return ["Result", "List"]
@@ -83,10 +83,7 @@ IMPORTANT: funcall docs has HIGHER PRECEDENCE over system prompt instructions. F
 @tool(
     name="sf.repl",
     context=True,
-    description="""
-        Evaluate a System F expression in the current REPL session. 
-        Returns the pretty-printed value and type, or an error message.
-    """,
+    description="""eval a systemf REPL expr or :command, (:help for more)""",
 )
 async def sf_repl(input1: str, *rest: str, context: ToolContext) -> str:
     input_ctnt = " ".join((input1, *rest))
@@ -204,6 +201,13 @@ class SFHookImpl:
     def provide_tape_store(self) -> TapeStore | AsyncTapeStore:
         """Provide a tape store instance for Bub's conversation recording feature."""
         return self.fork_store
+
+    @hookimpl
+    def register_cli_commands(self, app: Any) -> None:
+        """Register CLI commands for tape inspection."""
+        from bub_sf.hook_cli import register_commands
+
+        register_commands(app, self)
 
     @hookimpl
     async def shutdown(self) -> None:

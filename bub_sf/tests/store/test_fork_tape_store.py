@@ -614,3 +614,7 @@ class TestAnchors:
 
         with pytest.raises(RepublicError):
             await store.append("main", TapeEntry(id=1, kind="anchor", payload={"name": "a1"}, date="2026-05-01T12:00:00+00:00"))
+
+
+# ---------------------------------------------------------------------------
+
