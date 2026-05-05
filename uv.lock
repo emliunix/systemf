@@ -263,6 +263,7 @@ dependencies = [
     { name = "bub" },
     { name = "loguru" },
     { name = "republic" },
+    { name = "rich" },
     { name = "systemf" },
 ]
 
@@ -285,6 +286,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
     { name = "republic", editable = "republic" },
+    { name = "rich", specifier = ">=15.0.0" },
     { name = "systemf", editable = "systemf" },
 ]
 provides-extras = ["test"]

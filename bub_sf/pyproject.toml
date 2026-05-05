@@ -13,6 +13,7 @@ dependencies = [
     "loguru",
     "republic",
     "aiosqlite>=0.22.1",
+    "rich>=15.0.0",
 ]
 
 [project.scripts]

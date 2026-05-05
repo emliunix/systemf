@@ -158,6 +158,23 @@ class TestCoreOperations:
         assert set(await store.list_tapes()) == {"alpha", "beta"}
 
     @pytest.mark.asyncio
+    async def test_list_tapes_ext(self, store):
+        """list_tapes_ext returns tuples sorted by created DESC."""
+        assert await store.list_tapes_ext() == []
+
+        await store.append("alpha", make_entry(0))
+        await store.append("beta", make_entry(0))
+
+        tapes = await store.list_tapes_ext()
+        names = [t[0] for t in tapes]
+        assert set(names) == {"alpha", "beta"}
+        # Verify created dates are present and look like ISO timestamps
+        for name, meta in tapes:
+            created = meta["created"]
+            assert "T" in created
+            assert "1970-01-01" not in created  # New tapes should have real timestamps
+
+    @pytest.mark.asyncio
     async def test_reset_tape(self, store):
         """Resetting a tape archives old data and creates a new empty tape."""
         for i in range(3):
@@ -248,6 +265,34 @@ class TestCoreOperations:
 # ---------------------------------------------------------------------------
 # Fork Operations
 # ---------------------------------------------------------------------------
+
+class TestMigration:
+
+    @pytest.mark.asyncio
+    async def test_new_tape_has_created(self, store):
+        """Newly created tapes have a created timestamp."""
+        await store.create("fresh")
+        tapes = await store.list_tapes_ext()
+        assert len(tapes) == 1
+        name, meta = tapes[0]
+        assert name == "fresh"
+        assert "T" in meta["created"]
+        assert "1970-01-01" not in meta["created"]
+
+    @pytest.mark.asyncio
+    async def test_fork_inherits_created(self, store):
+        """Forked tapes have their own created timestamp."""
+        await store.append("parent", make_entry(0))
+        entries = await store.read("parent")
+        await store.fork("parent", entries[-1].id, "child")
+
+        tapes = await store.list_tapes_ext()
+        names = {t[0] for t in tapes}
+        assert names == {"parent", "child"}
+        for name, meta in tapes:
+            assert "T" in meta["created"]
+            assert "1970-01-01" not in meta["created"]
+
 
 class TestForkOperations:
 

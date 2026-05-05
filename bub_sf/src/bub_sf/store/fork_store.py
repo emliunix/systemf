@@ -11,6 +11,7 @@ import uuid
 
 from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, ParamSpec, TypeVar, override
 
@@ -26,13 +27,16 @@ from bub_sf.store.query import BuildQuery
 # Schema
 # ---------------------------------------------------------------------------
 
+_DEFAULT_CREATED = "1970-01-01T00:00:00+00:00"
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS tapes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
     parent_id INTEGER REFERENCES tapes(id),
     parent_entry_id INTEGER,
-    next_entry_id INTEGER DEFAULT 0
+    next_entry_id INTEGER DEFAULT 0,
+    created TEXT NOT NULL DEFAULT '1970-01-01T00:00:00+00:00'
 );
 
 CREATE TABLE IF NOT EXISTS tape_entries (
@@ -152,9 +156,10 @@ class CoreOps:
             if row:
                 return row[0], row[1]
 
+        now = datetime.now(UTC).isoformat()
         async with self._conn.execute(
-            "INSERT INTO tapes (name, next_entry_id) VALUES (?, 0)",
-            (tape_name,),
+            "INSERT INTO tapes (name, next_entry_id, created) VALUES (?, 0, ?)",
+            (tape_name, now),
         ) as cursor:
             if cursor.lastrowid is None:
                 raise _E(RepublicError(ErrorKind.UNKNOWN, "Failed to create tape"))
@@ -162,9 +167,10 @@ class CoreOps:
 
     async def create(self, name: str) -> None:
         """Create an empty tape. No-op if tape exists."""
+        now = datetime.now(UTC).isoformat()
         await self._conn.execute(
-            "INSERT OR IGNORE INTO tapes (name, next_entry_id) VALUES (?, 0)",
-            (name,),
+            "INSERT OR IGNORE INTO tapes (name, next_entry_id, created) VALUES (?, 0, ?)",
+            (name, now),
         )
 
     async def append(self, tape_name: str, entry: TapeEntry) -> None:
@@ -250,12 +256,13 @@ class CoreOps:
                 f"entry_id {entry_id} is out of range (0 to {next_entry_id - 1})"
             ))
 
+        now = datetime.now(UTC).isoformat()
         await self._conn.execute(
             """
-            INSERT INTO tapes (name, parent_id, parent_entry_id, next_entry_id)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO tapes (name, parent_id, parent_entry_id, next_entry_id, created)
+            VALUES (?, ?, ?, ?, ?)
             """,
-            (target_name, source_id, entry_id, entry_id + 1),
+            (target_name, source_id, entry_id, entry_id + 1, now),
         )
 
 
@@ -477,6 +484,12 @@ class SQLiteForkTapeStore(AsyncTapeStore):
     async def list_tapes(self) -> list[str]:
         async with self._conn.execute("SELECT name FROM tapes ORDER BY name") as cursor:
             return [row[0] async for row in cursor]
+
+    async def list_tapes_ext(self) -> list[tuple[str, dict[str, Any]]]:
+        async with self._conn.execute(
+            "SELECT name, created FROM tapes ORDER BY created DESC"
+        ) as cursor:
+            return [(row[0], {"created": row[1]}) async for row in cursor]
         
     @asynccontextmanager
     async def _tranx(self) -> AsyncGenerator[aiosqlite.Connection]:
