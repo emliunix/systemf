@@ -1,6 +1,6 @@
 # Project Status
 
-**Last Updated:** 2026-05-05
+**Last Updated:** 2026-05-06
 
 ## Conventions
 
@@ -55,7 +55,18 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
 9. LLM pragma to support temporary flag, allowed tools config, model config `#feature`
    - Extend `{-# LLM #-}` pragma to accept optional per-call configuration: temporary flag (don't persist tool defs), allowed tools list, and model override
 10. Hook system prompt or bub framework logic to be able to skip something `#feature`
-   - Add a mechanism (hook or config) to selectively skip parts of the system prompt or framework logic during a turn
+    - Add a mechanism (hook or config) to selectively skip parts of the system prompt or framework logic during a turn
+11. **bub_events channel** `#feature`
+    - TCP/JSON socket channel for event-driven agent reactions. Accepts JSON messages, validates with Pydantic, dispatches to framework.
+    - See `analysis/BUB_EVENTS_CHANNEL_EXPLORATION.md`
+12. **Tape provenance for tape fork**
+    - Track provenance information when forking tapes to understand lineage and relationships between tape versions
+13. **REPL LLM value agent call** `#feature`
+    - If user `.sf.repl` evaluates to an LLM value, it should be further executed as an agent call
+    - See [`changes/33-repl-llm-agent-call.md`](changes/33-repl-llm-agent-call.md)
+14. **my_skills system prompt injection** `#feature`
+    - Enhance `my_skills/` sub-project to inject system prompts that guide the agent on how to use available skills effectively
+    - Skills should declare their purpose, parameters, and usage patterns so the agent can discover and invoke them contextually
 
 ## Entry Points
 

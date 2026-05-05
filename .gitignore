@@ -165,3 +165,6 @@ EOF
 
 /*.db
 /*.db-*
+
+# Personal contact list (managed by people skill)
+people.md
