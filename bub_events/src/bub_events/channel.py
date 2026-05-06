@@ -65,12 +65,15 @@ class EventsChannel(Channel):
         @self._app.post("/event", dependencies=[Depends(_verify_auth)])
         async def _post_event(request: Request) -> dict[str, Any]:
             logger.info("http.request.inbound method=POST path=/event")
-            content_type = request.headers.get("content-type", "").lower()
+            content_type = request.headers.get("content-type", "").lower().split(";")[0].strip()
 
-            if "application/x-www-form-urlencoded" in content_type:
+            if content_type == "application/x-www-form-urlencoded":
                 msg = await self._parse_form(request)
-            else:
+            elif content_type in ("application/json", "") or content_type.startswith("application/json"):
                 msg = await self._parse_json(request)
+            else:
+                logger.warning("http.request.unsupported_content_type type={}", content_type)
+                raise HTTPException(status_code=415, detail=f"Unsupported content type: {content_type}")
 
             logger.info("http.request.validated content={} chat_id={} sender={} topic={}", msg.content, msg.chat_id, msg.sender, msg.topic)
             return await self._handle_request(msg)
@@ -82,17 +85,15 @@ class EventsChannel(Channel):
     async def _parse_json(self, request: Request) -> EventMessage:
         try:
             payload = await request.json()
-        except Exception:
+        except ValueError:
             logger.warning("http.request.invalid_json")
             raise HTTPException(status_code=400, detail="Invalid JSON")
+
         try:
             return EventMessage.model_validate(payload)
         except ValidationError as e:
             logger.warning("http.request.validation_error errors={}", e.errors())
             raise HTTPException(status_code=422, detail=e.errors())
-        except Exception as e:
-            logger.warning("http.request.validation_error detail={}", str(e))
-            raise HTTPException(status_code=422, detail=str(e))
 
     async def _parse_form(self, request: Request) -> EventMessage:
         form = await request.form()

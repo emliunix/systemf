@@ -249,7 +249,7 @@ async def test_post_form_missing_content(channel, mock_handler):
 
 @pytest.mark.asyncio
 async def test_post_unknown_content_type(channel, mock_handler):
-    """Test POST with unknown content-type returns 400."""
+    """Test POST with unknown content-type returns 415."""
     async with AsyncClient(
         transport=ASGITransport(app=channel._app),
         base_url="http://test",
@@ -259,7 +259,7 @@ async def test_post_unknown_content_type(channel, mock_handler):
             content="hello",
             headers={"Content-Type": "text/plain"},
         )
-        assert response.status_code == 400
+        assert response.status_code == 415
         mock_handler.assert_not_called()
 
 
