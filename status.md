@@ -77,14 +77,12 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - Extend channel to support events: channel owns session/session_id, knows when session is idle, and should compact context to prepare for later messages
     - See [`changes/34-channel-events-design.md`](changes/34-channel-events-design.md)
 16. **Channel manager session serialization** `#feature`
-    - Enforce per-session (tape) message serialization in `ChannelManager` — at most one `process_inbound` per session at a time
-    - Prevents interleaved agent turns, race conditions on tape fork/merge, and duplicate outbound messages
-    - **Design:** [`changes/35-channel-manager-session-serialization.md`](changes/35-channel-manager-session-serialization.md)
-17. **Sync message processing by session (tape) in channel manager** `#feature`
     - **Problem:** Tape is append-only. If multiple agent calls use the same tape in parallel, they see each other's progress — "brain interleaving"
-    - **Fact:** Session ID determines tape
-    - **Solution:** Limit to 1 parallel `process_inbound` per session ID in `ChannelManager`
-    - **Design:** [`changes/36-session-tape-sync.md`](changes/36-session-tape-sync.md)
+    - **Fact:** Session ID determines tape → same session = same tape
+    - **Solution:** Enforce per-session serialization in `ChannelManager` — at most one `process_inbound` per session at a time
+    - Prevents interleaved agent turns, race conditions on tape fork/merge, and duplicate outbound messages
+    - **Design:** [`changes/35-channel-manager-session-serialization.md`](changes/35-channel-manager-session-serialization.md) (implementation options)
+    - **Problem statement:** [`changes/36-session-tape-sync.md`](changes/36-session-tape-sync.md) (why this is needed)
 
 ## Entry Points
 
