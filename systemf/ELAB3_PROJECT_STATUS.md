@@ -57,6 +57,7 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 11. **Expose/synthesize Python module from SystemF module** `#exploration`: Explore generating a Python module from a compiled SystemF module. The practical benefit is not yet clear, but it would be a cool bridge between the two languages.
 12. **Enforce import semantics** `#issue`: We should `eval_mod` of imported modules first, so the order of evaluation is controlled by import statements. For this to work, we need to preserve the import module names and their order from program parsing through to the `Module` object.
 13. **Simplify prim ops with `VSuspend`** `#refactoring`: Currently primitive operations are wrapped in `VPartial` with manual arity tracking and session-aware finish callbacks. Introduce a `VSuspend` value constructor that suspends evaluation when a primitive is called with insufficient arguments, simplifying the `VPartial`/`SessionAwareFinish` complexity and making primitive operations more uniform.
+14. **Preserve type applications for primops** `#feature`: Currently `CoreTyApp` discards type arguments during evaluation (eval.py:201-202). Polymorphic primops like `ask :: forall a. Tape -> String -> a` cannot know the instantiated type `a`. Extend the evaluator to accumulate type applications in `VPartial` or pass them to the primop finish callback, enabling type-aware primitive operations. Needed for LLM primitives that must parse/typecheck their result based on the requested type.
 
 
 ## Entry Points
