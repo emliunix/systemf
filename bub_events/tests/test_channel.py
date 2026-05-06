@@ -144,6 +144,7 @@ async def test_post_event_with_metadata(channel, mock_handler):
                 "content": "hello",
                 "chat_id": "room1",
                 "sender": "cron",
+                "topic": "disk-alert",
                 "meta": {"job_id": "abc"},
             },
         )
@@ -155,9 +156,111 @@ async def test_post_event_with_metadata(channel, mock_handler):
         assert call_args.chat_id == "room1"
         assert call_args.content == "hello"
         assert call_args.context["sender"] == "cron"
+        assert call_args.context["topic"] == "disk-alert"
         assert call_args.context["job_id"] == "abc"
         # session_id should be a generated UUID
         assert len(call_args.session_id) == 36
+
+
+@pytest.mark.asyncio
+async def test_post_form_urlencoded(channel, mock_handler):
+    """Test POST with application/x-www-form-urlencoded."""
+    channel._settings.response_timeout = 0.1
+    async with AsyncClient(
+        transport=ASGITransport(app=channel._app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/event",
+            data={"content": "hello", "chat_id": "room1", "sender": "cron", "topic": "alert"},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 200
+        mock_handler.assert_awaited_once()
+        call_args = mock_handler.call_args[0][0]
+        assert call_args.content == "hello"
+        assert call_args.chat_id == "room1"
+        assert call_args.context["sender"] == "cron"
+        assert call_args.context["topic"] == "alert"
+
+
+@pytest.mark.asyncio
+async def test_post_form_without_content_type(channel, mock_handler):
+    """Test POST without explicit content-type (curl default)."""
+    channel._settings.response_timeout = 0.1
+    async with AsyncClient(
+        transport=ASGITransport(app=channel._app),
+        base_url="http://test",
+    ) as client:
+        # httpx defaults to form-encoded when data= is used without content-type
+        response = await client.post(
+            "/event",
+            data={"content": "hello", "chat_id": "room1"},
+        )
+        assert response.status_code == 200
+        mock_handler.assert_awaited_once()
+        call_args = mock_handler.call_args[0][0]
+        assert call_args.content == "hello"
+        assert call_args.chat_id == "room1"
+
+
+@pytest.mark.asyncio
+async def test_post_form_with_meta(channel, mock_handler):
+    """Test nested meta fields in form data."""
+    channel._settings.response_timeout = 0.1
+    async with AsyncClient(
+        transport=ASGITransport(app=channel._app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/event",
+            data={
+                "content": "hello",
+                "meta[job_id]": "abc",
+                "meta[source]": "cron",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 200
+        mock_handler.assert_awaited_once()
+        call_args = mock_handler.call_args[0][0]
+        assert call_args.context["job_id"] == "abc"
+        assert call_args.context["source"] == "cron"
+
+
+@pytest.mark.asyncio
+async def test_post_form_missing_content(channel, mock_handler):
+    """Test form POST with missing content field."""
+    channel._settings.response_timeout = 0.1
+    async with AsyncClient(
+        transport=ASGITransport(app=channel._app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/event",
+            data={"chat_id": "room1"},
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert response.status_code == 200
+        mock_handler.assert_awaited_once()
+        call_args = mock_handler.call_args[0][0]
+        assert call_args.content == ""
+
+
+@pytest.mark.asyncio
+async def test_post_unknown_content_type(channel, mock_handler):
+    """Test POST with unknown content-type returns 400."""
+    async with AsyncClient(
+        transport=ASGITransport(app=channel._app),
+        base_url="http://test",
+    ) as client:
+        response = await client.post(
+            "/event",
+            content="hello",
+            headers={"Content-Type": "text/plain"},
+        )
+        assert response.status_code == 400
+        mock_handler.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -229,7 +332,7 @@ async def test_send_race_safety(channel):
     from bub.channels.message import ChannelMessage
     outbound = ChannelMessage(
         session_id="test-id",
-        channel="bub_events",
+        channel="bub-events",
         content="late",
     )
     await channel.send(outbound)
@@ -242,7 +345,7 @@ async def test_send_ignores_unknown_session(channel):
     from bub.channels.message import ChannelMessage
     outbound = ChannelMessage(
         session_id="unknown-id",
-        channel="bub_events",
+        channel="bub-events",
         content="orphan",
     )
     await channel.send(outbound)

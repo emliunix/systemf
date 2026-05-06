@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import uuid
 from typing import Any, ClassVar
@@ -64,27 +65,54 @@ class EventsChannel(Channel):
         @self._app.post("/event", dependencies=[Depends(_verify_auth)])
         async def _post_event(request: Request) -> dict[str, Any]:
             logger.info("http.request.inbound method=POST path=/event")
-            try:
-                payload = await request.json()
-            except Exception:
-                logger.warning("http.request.invalid_json")
-                raise HTTPException(status_code=400, detail="Invalid JSON")
+            content_type = request.headers.get("content-type", "").lower()
 
-            try:
-                msg = EventMessage.model_validate(payload)
-            except ValidationError as e:
-                logger.warning("http.request.validation_error errors={}", e.errors())
-                raise HTTPException(status_code=422, detail=e.errors())
-            except Exception as e:
-                logger.warning("http.request.validation_error detail={}", str(e))
-                raise HTTPException(status_code=422, detail=str(e))
+            if "application/x-www-form-urlencoded" in content_type:
+                msg = await self._parse_form(request)
+            else:
+                msg = await self._parse_json(request)
 
-            logger.info("http.request.validated content={} chat_id={} sender={}", msg.content, msg.chat_id, msg.sender)
+            logger.info("http.request.validated content={} chat_id={} sender={} topic={}", msg.content, msg.chat_id, msg.sender, msg.topic)
             return await self._handle_request(msg)
 
         @self._app.get("/health")
         async def _health() -> dict[str, str]:
             return {"status": "healthy"}
+
+    async def _parse_json(self, request: Request) -> EventMessage:
+        try:
+            payload = await request.json()
+        except Exception:
+            logger.warning("http.request.invalid_json")
+            raise HTTPException(status_code=400, detail="Invalid JSON")
+        try:
+            return EventMessage.model_validate(payload)
+        except ValidationError as e:
+            logger.warning("http.request.validation_error errors={}", e.errors())
+            raise HTTPException(status_code=422, detail=e.errors())
+        except Exception as e:
+            logger.warning("http.request.validation_error detail={}", str(e))
+            raise HTTPException(status_code=422, detail=str(e))
+
+    async def _parse_form(self, request: Request) -> EventMessage:
+        form = await request.form()
+        meta = {}
+        for key, value in form.multi_items():
+            if key.startswith("meta[") and key.endswith("]"):
+                meta_key = key[5:-1]  # Extract key from meta[key]
+                meta[meta_key] = value
+        try:
+            return EventMessage(
+                content=form.get("content", ""),
+                chat_id=form.get("chat_id", "default"),
+                sender=form.get("sender", "unknown"),
+                topic=form.get("topic", ""),
+                kind=form.get("kind", "normal"),
+                meta=meta,
+            )
+        except ValidationError as e:
+            logger.warning("http.request.validation_error errors={}", e.errors())
+            raise HTTPException(status_code=422, detail=e.errors())
 
     async def _handle_request(self, msg: EventMessage) -> dict[str, Any]:
         request_id = str(uuid.uuid4())
@@ -99,7 +127,7 @@ class EventsChannel(Channel):
             chat_id=msg.chat_id,
             content=msg.content,
             kind=msg.kind,
-            context={"sender": msg.sender, **msg.meta},
+            context={"sender": msg.sender, "topic": msg.topic, **msg.meta},
         )
 
         try:
@@ -141,13 +169,46 @@ class EventsChannel(Channel):
         )
         self._server = uvicorn.Server(config)
 
+        # Monkey-patch startup to signal when the server is ready.
+        started_event = asyncio.Event()
+        original_startup = self._server.startup
+
+        async def _wrapped_startup(sockets=None):
+            await original_startup(sockets)
+            started_event.set()
+
+        self._server.startup = _wrapped_startup
+
         # Start server in background and return immediately
         # Don't block on stop_event - ChannelManager handles shutdown via stop()
-        asyncio.create_task(self._server.serve())
+        task = asyncio.create_task(self._server.serve())
 
-        # Wait until server is ready
-        while not self._server.started:
-            await asyncio.sleep(0.01)
+        # Wait until server is ready or the task fails
+        wait_started = asyncio.create_task(started_event.wait())
+        done, pending = await asyncio.wait(
+            [wait_started, task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for fut in pending:
+            fut.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await fut
+
+        if task in done:
+            exc = task.exception()
+            if isinstance(exc, SystemExit):
+                await self.stop()
+                raise RuntimeError(
+                    f"EventsChannel failed to start on {self._settings.host}:{self._settings.port}. "
+                    f"Port may already be in use."
+                ) from exc
+            if exc is not None:
+                await self.stop()
+                raise exc
+            await self.stop()
+            raise RuntimeError(
+                f"EventsChannel server exited without starting on {self._settings.host}:{self._settings.port}."
+            )
 
         logger.info("EventsChannel started on {}:{}", self._settings.host, self._settings.port)
 
