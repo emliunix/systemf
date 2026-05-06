@@ -80,9 +80,10 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - Enforce per-session (tape) message serialization in `ChannelManager` — at most one `process_inbound` per session at a time
     - Prevents interleaved agent turns, race conditions on tape fork/merge, and duplicate outbound messages
     - **Design:** [`changes/35-channel-manager-session-serialization.md`](changes/35-channel-manager-session-serialization.md)
-17. **Sync session ID to tape in channel manager** `#feature`
-    - Each session ID should deterministically map to a tape
-    - The channel manager should enforce this binding so that the same "brain" isn't interleaving across multiple concurrent contexts
+17. **Sync message processing by session (tape) in channel manager** `#feature`
+    - **Problem:** Tape is append-only. If multiple agent calls use the same tape in parallel, they see each other's progress — "brain interleaving"
+    - **Fact:** Session ID determines tape
+    - **Solution:** Limit to 1 parallel `process_inbound` per session ID in `ChannelManager`
     - **Design:** [`changes/36-session-tape-sync.md`](changes/36-session-tape-sync.md)
 
 ## Entry Points
