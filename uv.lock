@@ -264,6 +264,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-multipart" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -288,6 +289,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
 provides-extras = ["test"]
@@ -1657,6 +1659,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-multipart"
+version = "0.0.27"
+source = { registry = "https://mirrors.ustc.edu.cn/pypi/web/simple/" }
+sdist = { url = "https://mirrors.ustc.edu.cn/pypi/packages/69/9b/f23807317a113dc36e74e75eb265a02dd1a4d9082abc3c1064acd22997c4/python_multipart-0.0.27.tar.gz", hash = "sha256:9870a6a8c5a20a5bf4f07c017bd1489006ff8836cff097b6933355ee2b49b602", size = 44043, upload-time = "2026-04-27T10:51:26.649Z" }
+wheels = [
+    { url = "https://mirrors.ustc.edu.cn/pypi/packages/99/78/4126abcbdbd3c559d43e0db7f7b9173fc6befe45d39a2856cc0b8ec2a5a6/python_multipart-0.0.27-py3-none-any.whl", hash = "sha256:6fccfad17a27334bd0193681b369f476eda3409f17381a2d65aa7df3f7275645", size = 29254, upload-time = "2026-04-27T10:51:24.997Z" },
+]
+
+[[package]]
 name = "python-telegram-bot"
 version = "22.7"
 source = { registry = "https://mirrors.ustc.edu.cn/pypi/web/simple/" }
@@ -1901,8 +1912,6 @@ name = "systemf"
 version = "0.1.0"
 source = { editable = "systemf" }
 dependencies = [
-    { name = "anthropic" },
-    { name = "openai" },
     { name = "parsy" },
     { name = "pyrsistent" },
 ]
@@ -1918,8 +1927,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.21.0" },
-    { name = "openai", specifier = ">=1.0.0" },
     { name = "parsy", specifier = ">=2.1" },
     { name = "pyrsistent", specifier = ">=0.20.0" },
 ]
@@ -1941,6 +1948,7 @@ dependencies = [
     { name = "bub" },
     { name = "bub-events" },
     { name = "bub-sf" },
+    { name = "republic" },
     { name = "systemf" },
 ]
 
@@ -1949,6 +1957,7 @@ requires-dist = [
     { name = "bub", editable = "bub" },
     { name = "bub-events", editable = "bub_events" },
     { name = "bub-sf", editable = "bub_sf" },
+    { name = "republic", editable = "republic" },
     { name = "systemf", editable = "systemf" },
 ]
 

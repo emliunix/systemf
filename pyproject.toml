@@ -3,10 +3,11 @@ name = "systemf_workspace"
 version = "0.1.0"
 
 dependencies = [
+    "systemf",
     "bub_sf",
     "bub_events",
-    "systemf",
     "bub",
+    "republic",
 ]
 
 [tool.uv.workspace]
@@ -21,15 +22,15 @@ members = [
 [tool.uv.sources]
 systemf = { workspace = true }
 bub_sf = { workspace = true }
+bub_events = { workspace = true }
 bub = { workspace = true }
 republic = { workspace = true }
-bub_events = { workspace = true }
 
 [tool.pyright]
 extraPaths = [
-  "bub_sf/src/",
   "systemf/src/",
+  "bub_sf/src/",
+  "bub_events/src/",
   "bub/src/",
   "republic/src/",
-  "bub_events/src/",
 ]

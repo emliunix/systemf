@@ -96,7 +96,7 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - SystemF primitive for tape handoff: `tape_handoff :: Tape -> String -> Unit`
     - Enables the compaction pattern: fork tape, summarize, handoff, append summary
     - Required for demo of context compaction as first-class operation
-    - **Change:** [`changes/40-product-demo-prep.md`](changes/40-product-demo-prep.md)
+    - **Change:** [`changes/41-tape-handoff-primop.md`](changes/41-tape-handoff-primop.md)
 
 ## Entry Points
 

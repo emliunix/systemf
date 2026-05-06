@@ -1,5 +1,36 @@
 # Product Demo Preparation
 
+## Raw Topics
+
+These were discussed during preparation but not folded into the focused demo script below. Kept here for reference and potential expansion.
+
+### Additional Patterns
+- **Assisted recall**: LLM tools `fs.read`, `bash` → generate `Recall` items (filepath, linenum, comment)
+- **Explore ask**: Agent explores context before asking clarifying questions
+
+### Research Context
+- **GEPA** (Generalized Event Processing Architecture): Event-driven agent reactions
+- **Memory systems**: Long-term storage beyond conversation context
+- **Skill evolver**: Auto-improving skills based on usage patterns
+- **Model layer caps**: SFT, RLFT, prefix cache
+
+### Competitive Landscape
+- **Claude Code**: Editor-integrated agent, limited context control
+- **/btw pattern**: Context injection via special syntax, not first-class
+- **Subagent tools**: Two concerns — parallel execution + context control
+- **Small tweaks**: Most frameworks only allow prompt adjustments, not structural context manipulation
+
+### Architecture (for reference)
+- **REPL as language primitive**: SystemF REPL integration, REPL as a tool
+- **Tools + skills**: Tools are primitives, skills are composable extensions
+- **Tape operations**: Fork, pass, merge as first-class values
+- **Extensible framework**: Extension points `tape_store`, `run_model_stream`, `cli`
+- **Agent split**: `CommandProcessor` vs `AgentLoop` for structural dispatch
+
+### Deprecated Items (replaced by HTTP Flask API)
+- ~~TCP/JSON `bub_events` channel~~ → now HTTP API
+- ~~`bub_jobs` systemd cron~~ → now HTTP-triggered cron
+
 ## Pitch
 
 > "Every agent framework has compaction and subagents. But they're black boxes. In SystemF, they're just functions — typed, composable, and extensible."
