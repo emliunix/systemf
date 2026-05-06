@@ -20,6 +20,7 @@ from bub.types import Envelope, State
 
 from bub_sf.store.fork_store import SQLiteForkTapeStore
 from bub_sf.bub_ext import BubExt
+from bub_sf.hook_cli import register_commands
 from republic.core.results import AsyncStreamEvents
 from republic.tape.store import AsyncTapeStore, TapeStore
 from systemf.elab3.reader_env import QualName
@@ -205,8 +206,6 @@ class SFHookImpl:
     @hookimpl
     def register_cli_commands(self, app: Any) -> None:
         """Register CLI commands for tape inspection."""
-        from bub_sf.hook_cli import register_commands
-
         register_commands(app, self)
 
     @hookimpl

@@ -268,15 +268,13 @@ dependencies = [
     { name = "uvicorn", extra = ["standard"] },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
+dev = [
+    { name = "pytest-asyncio" },
+]
 test = [
     { name = "httpx" },
     { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
-[package.dev-dependencies]
-dev = [
     { name = "pytest-asyncio" },
 ]
 
@@ -284,18 +282,19 @@ dev = [
 requires-dist = [
     { name = "bub", editable = "bub" },
     { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "httpx", marker = "extra == 'test'", specifier = ">=0.28.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
     { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
-provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest-asyncio", specifier = ">=1.3.0" }]
+test = [
+    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.25.0" },
+]
 
 [[package]]
 name = "bub-sf"
@@ -310,14 +309,12 @@ dependencies = [
     { name = "systemf" },
 ]
 
-[package.optional-dependencies]
-test = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-]
-
 [package.dev-dependencies]
 dev = [
+    { name = "pytest-asyncio" },
+]
+test = [
+    { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
 
@@ -326,16 +323,17 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "bub", editable = "bub" },
     { name = "loguru" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'test'", specifier = ">=0.25.0" },
     { name = "republic", editable = "republic" },
     { name = "rich", specifier = ">=15.0.0" },
     { name = "systemf", editable = "systemf" },
 ]
-provides-extras = ["test"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest-asyncio", specifier = ">=1.3.0" }]
+test = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.25.0" },
+]
 
 [[package]]
 name = "cachetools"
