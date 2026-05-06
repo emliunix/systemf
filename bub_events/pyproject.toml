@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.entry-points.bub]
-events = "bub_events.hook:EventsHookImpl"
+bub-events = "bub_events.hook:EventsHookImpl"
 
 [project.optional-dependencies]
 test = [

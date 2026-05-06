@@ -33,7 +33,7 @@ class LoguruHandler(logging.Handler):
 
 
 class EventsChannel(Channel):
-    name: ClassVar[str] = "bub_events"
+    name: ClassVar[str] = "bub-events"
 
     def __init__(self, on_receive: MessageHandler, settings: EventsSettings) -> None:
         self._on_receive = on_receive
@@ -95,7 +95,7 @@ class EventsChannel(Channel):
 
         channel_msg = ChannelMessage(
             session_id=request_id,
-            channel="bub_events",
+            channel="bub-events",
             chat_id=msg.chat_id,
             content=msg.content,
             kind=msg.kind,

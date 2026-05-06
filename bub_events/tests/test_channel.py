@@ -25,7 +25,7 @@ def channel(mock_handler, settings):
 
 
 def test_channel_name(channel):
-    assert channel.name == "bub_events"
+    assert channel.name == "bub-events"
 
 
 @pytest.mark.asyncio
@@ -151,7 +151,7 @@ async def test_post_event_with_metadata(channel, mock_handler):
         mock_handler.assert_awaited_once()
         # Verify the ChannelMessage was built correctly
         call_args = mock_handler.call_args[0][0]
-        assert call_args.channel == "bub_events"
+        assert call_args.channel == "bub-events"
         assert call_args.chat_id == "room1"
         assert call_args.content == "hello"
         assert call_args.context["sender"] == "cron"
@@ -168,7 +168,7 @@ async def test_response_linking(channel, mock_handler):
         await asyncio.sleep(0.05)
         outbound = ChannelMessage(
             session_id=channel_msg.session_id,
-            channel="bub_events",
+            channel="bub-events",
             chat_id=channel_msg.chat_id,
             content="processed result",
             context=channel_msg.context,
