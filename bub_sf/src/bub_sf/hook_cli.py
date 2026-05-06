@@ -16,6 +16,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from bub_sf.store.fork_store import SQLiteForkTapeStore
+from systemf.elab3.repl import REPL
 
 
 def register_commands(app: typer.Typer, hook_impl: Any) -> None:
@@ -95,6 +96,41 @@ def register_commands(app: typer.Typer, hook_impl: Any) -> None:
 
         asyncio.run(_run())
         asyncio.run(hook_impl.framework.shutdown())
+
+    @app.command("sf-check")
+    def sf_check(
+        ctx: typer.Context,
+        module: str = typer.Argument(..., help="Module path to typecheck (e.g., test.hello)"),
+        search_paths: list[str] = typer.Option([], "-L", help="Additional search paths (repeatable)"),
+    ) -> None:
+        """Typecheck a SystemF module without evaluating it."""
+
+        def _run() -> None:
+            if not module or "." in (module[0], module[-1]):
+                typer.secho("Error: invalid module name", err=True, fg=typer.colors.RED)
+                raise typer.Exit(1)
+
+            repl = REPL(search_paths=search_paths)
+            try:
+                mod = repl.load(module)
+                typer.secho(f"OK: {module}", fg=typer.colors.GREEN)
+                if mod.exports:
+                    typer.echo("Exports:")
+                    for name in mod.exports:
+                        typer.echo(f"  {name.mod}.{name.surface}")
+            except FileNotFoundError as exc:
+                typer.secho(f"Module not found: {exc}", err=True, fg=typer.colors.RED)
+                raise typer.Exit(1)
+            except Exception as exc:
+                typer.secho(f"Error: {exc}", err=True, fg=typer.colors.RED)
+                raise typer.Exit(1)
+
+        _run()
+        # NOTE: we intentionally do NOT call hook_impl.framework.shutdown() here.
+        # sf-check creates its own bare REPL and never touches framework resources
+        # (fork_store, channels, agents). Shutting down the framework would be
+        # unnecessary and can hang on error paths. Sibling commands that DO use
+        # framework resources (print-tape, list-tapes) call shutdown themselves.
 
 
 def _print_entry(entry: TapeEntry | GroupedEntry) -> None:

@@ -1,0 +1,26 @@
+-- | Example SystemF module for sf-check demonstration
+
+import builtins
+
+-- | A 2D point
+data Point = MkPoint Int Int
+
+-- | Distance squared from origin
+distance :: Point -> Int = \p ->
+  case p of
+    MkPoint x y -> x * x + y * y
+
+-- | A polymorphic identity function
+id :: forall a. a -> a = \x -> x
+
+-- | Apply a function twice
+twice :: forall a. (a -> a) -> a -> a = \f x -> f (f x)
+
+-- | Result type for operations that may fail
+data Result a b = Ok a | Err b
+
+-- | Extract value with default
+fromResult :: forall a b. a -> Result a b -> a = \default r ->
+  case r of
+    Ok a -> a
+    Err _ -> default
