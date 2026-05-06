@@ -19,11 +19,11 @@ Events arrive at `POST /event` and are processed as a single agent turn with bid
 
 ## Topic-Based Documentation Convention
 
-Events carry a `topic` field that triggers loading of topic-specific documentation:
+Events carry a `topic` field that references topic-specific documentation:
 
 **Location:** `{workspace}/event_prompts/{topic}.md`
 
-**Example:** An event with `topic=disk-alert` loads `{workspace}/event_prompts/disk-alert.md`
+**Example:** An event with `topic=disk-alert` references `{workspace}/event_prompts/disk-alert.md`
 
 **Purpose:** Topic docs provide comprehensive handling instructions for specific event types, including:
 - What the event means
