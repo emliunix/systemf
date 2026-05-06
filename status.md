@@ -87,6 +87,16 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - Prevents interleaved agent turns, race conditions on tape fork/merge, and duplicate outbound messages
     - **Design:** [`changes/35-channel-manager-session-serialization.md`](changes/35-channel-manager-session-serialization.md) (implementation options)
     - **Problem statement:** [`changes/36-session-tape-sync.md`](changes/36-session-tape-sync.md) (why this is needed)
+17. **Product demo preparation** `#feature`
+    - Prepare demo covering: model ordinary agents, assisted recall pattern, explore ask pattern
+    - Architecture: REPL as language primitive, tools + skills framework, tape, extensibility
+    - Special features: events channel, systemd cron jobs, people skill
+    - **Change:** [`changes/40-product-demo-prep.md`](changes/40-product-demo-prep.md)
+18. **Add `tape_handoff` primop** `#feature`
+    - SystemF primitive for tape handoff: `tape_handoff :: Tape -> String -> Unit`
+    - Enables the compaction pattern: fork tape, summarize, handoff, append summary
+    - Required for demo of context compaction as first-class operation
+    - **Change:** [`changes/40-product-demo-prep.md`](changes/40-product-demo-prep.md)
 
 ## Entry Points
 
