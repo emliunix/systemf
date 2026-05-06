@@ -23,6 +23,12 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
 - SystemF Orchestrator: `bub_sf` intercepts `run_model_stream` to evaluate `main.main` (`bub_sf/src/bub_sf/hook.py:153`).
 - Tape Integration: SQLite fork store and tape primitives (`bub_sf/src/bub_sf/store/fork_store.py`).
 - LLM Synthesizer: `{-# LLM #-}` pragma triggers agent calls (`bub_sf/src/bub_sf/bub_ext.py:83`).
+- **LLM pragma options** (`bub_sf/src/bub_sf/bub_ext.py`):
+  - `notools` — restricts tools to only `sf.repl` for lightweight text generation
+  - `noskills` — disables markdown skill injections for cleaner context
+- **Funcall prompt instruction** (`bub_sf/src/bub_sf/bub_ext.py:211`):
+  - Injects `<rules>Strictly follow the instructions funcall doc to complete the funcall</rules>` at the top of every funcall prompt
+  - Leverages docstrings as the actual instruction content
 
 ## Issues
 
@@ -67,6 +73,17 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
 14. **my_skills system prompt injection** `#feature`
     - Enhance `my_skills/` sub-project to inject system prompts that guide the agent on how to use available skills effectively
     - Skills should declare their purpose, parameters, and usage patterns so the agent can discover and invoke them contextually
+15. **Channel events design** `#feature`
+    - Extend channel to support events: channel owns session/session_id, knows when session is idle, and should compact context to prepare for later messages
+    - See [`changes/34-channel-events-design.md`](changes/34-channel-events-design.md)
+16. **Channel manager session serialization** `#feature`
+    - Enforce per-session (tape) message serialization in `ChannelManager` — at most one `process_inbound` per session at a time
+    - Prevents interleaved agent turns, race conditions on tape fork/merge, and duplicate outbound messages
+    - **Design:** [`changes/35-channel-manager-session-serialization.md`](changes/35-channel-manager-session-serialization.md)
+17. **Sync session ID to tape in channel manager** `#feature`
+    - Each session ID should deterministically map to a tape
+    - The channel manager should enforce this binding so that the same "brain" isn't interleaving across multiple concurrent contexts
+    - **Design:** [`changes/36-session-tape-sync.md`](changes/36-session-tape-sync.md)
 
 ## Entry Points
 

@@ -1,7 +1,7 @@
 import uuid
 
 from os import path
-from typing import Any, cast, override
+from typing import Any, TypedDict, Unpack, cast, override
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
 
@@ -83,8 +83,16 @@ class LLMOps(Synthesizer):
     @override
     def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None:
         # handles only prim_ops with LLM pragma
-        if thing.metas is None or thing.metas.pragma.get("LLM") is None:
+        if thing.metas is None or (llm_prag := thing.metas.pragma.get("LLM")) is None:
             return None
+        
+        llm_opts = [s.strip() for s in llm_prag.split(" ")]
+        agent_kwargs = {}
+        for opt in llm_opts:
+            match opt:
+                case "notools": agent_kwargs["allowed_tools"] = ["sf.repl"]
+                case "noskills": agent_kwargs["allowed_skills"] = []
+                case _: pass
 
         match_res = _match_llm_funty(thing.id.ty, session)
 
@@ -139,9 +147,9 @@ class LLMOps(Synthesizer):
                 res, res_ty, res_doc
             )
             if match_res.is_llm_res:
-                return await _stream_llm_call(*llm_call_args)
+                return await _stream_llm_call(*llm_call_args, **agent_kwargs)
             else:
-                return await _direct_llm_call(*llm_call_args)
+                return await _direct_llm_call(*llm_call_args, **agent_kwargs)
         
         return VPartial.create(name.surface, match_res.orig_arg_num, SessionAwareFinish.from_async(_fun))
 
@@ -166,7 +174,7 @@ def _get_agent(state: dict[str, Any]) -> Agent:
     return cast(Agent, state["_runtime_agent"])
 
 
-async def run_agent_with_repl(repl: REPLSessionProto, tape_name: str, prompt: str) -> str:
+async def run_agent_with_repl(repl: REPLSessionProto, tape_name: str, prompt: str, **kwargs: Unpack[LLMCallConfig]) -> str:
     """Run a task with sub-agent using specific model and session."""
     state = repl.state["bub_state"]
 
@@ -175,11 +183,12 @@ async def run_agent_with_repl(repl: REPLSessionProto, tape_name: str, prompt: st
         tape_name=tape_name,
         prompt=prompt,
         state=state,
+        **kwargs
     )
     return output
 
 
-async def run_agent_with_repl_and_stream(repl: REPLSessionProto, tape_name: str, prompt: str) -> AsyncStreamEvents:
+async def run_agent_with_repl_and_stream(repl: REPLSessionProto, tape_name: str, prompt: str, **kwargs: Unpack[LLMCallConfig]) -> AsyncStreamEvents:
     """Run a task with sub-agent using specific model and session, and stream the output."""
     state = repl.state["bub_state"]
     agent = _get_agent(state)
@@ -187,6 +196,7 @@ async def run_agent_with_repl_and_stream(repl: REPLSessionProto, tape_name: str,
         tape_name=tape_name,
         prompt=prompt,
         state=state,
+        **kwargs
     )
 
 
@@ -198,6 +208,7 @@ def _build_func_prompt(name: Name, doc: str | None, args: list[tuple[str, Ty, st
             return f"""<arg name="{name}" type="{arg_ty}" />"""
 
     def _lines() -> Generator[str, None, None]:
+        yield "<rules>Strictly follow the instructions funcall doc to complete the funcall</rules>"
         yield f"""<funcall mod="{name.mod}" source="{name.loc}" name="{name.surface}">"""
         if doc:
             yield f"<doc>{doc}</doc>"
@@ -332,12 +343,13 @@ async def _stream_llm_call(
     name: Name, doc: str | None,
     arg_vals: list[Val], arg_tys: list[Ty], arg_docs: list[str | None],
     res: list[Val | None], res_ty: Ty, res_doc: str | None,
+    **kwargs: Unpack[LLMCallConfig]
 ) -> Val:
     prompt = "\n".join([
         _pp_nonfunc_val(session, f"arg{i}", v, ty, doc)
         for i, (v, ty, doc) in enumerate(zip(arg_vals, arg_tys, arg_docs))
     ])
-    return VPrim((await run_agent_with_repl_and_stream(session, tape_name, prompt), res))
+    return VPrim((await run_agent_with_repl_and_stream(session, tape_name, prompt, **kwargs), res))
 
 
 async def _direct_llm_call(
@@ -345,14 +357,21 @@ async def _direct_llm_call(
     name: Name, doc: str | None,
     arg_vals: list[Val], arg_tys: list[Ty], arg_docs: list[str | None],
     res: list[Val | None], res_ty: Ty, res_doc: str | None,
+    **kwargs: Unpack[LLMCallConfig]
 ) -> Val:
     func_prompt = _build_func_prompt(
         name, doc,
         list((f"arg{i}", ty, doc) for i, (ty, doc) in enumerate(zip(arg_tys, arg_docs))),
         res_ty, res_doc,
     )
-    _ = await run_agent_with_repl(session, tape_name, func_prompt)
+    _ = await run_agent_with_repl(session, tape_name, func_prompt, **kwargs)
     # return captured value, discard agent output
     if res[0] is None:
         raise Exception("Expected return value to be set by test_prim body")
     return res[0]
+
+
+class LLMCallConfig(TypedDict, total=False):
+    allowed_tools: list[str] | None
+    allowed_skills: list[str] | None
+    model: str | None
