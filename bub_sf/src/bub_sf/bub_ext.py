@@ -12,6 +12,7 @@ from bub.framework import BubFramework
 from republic.core.results import AsyncStreamEvents
 
 from bub_sf.store.fork_store import SQLiteForkTapeStore
+from republic.tape.entries import TapeEntry
 from systemf.elab3 import builtins as bi
 from systemf.elab3.val_pp import pp_val
 from systemf.elab3.types.protocols import Ext, REPLSessionProto, Synthesizer
@@ -70,11 +71,31 @@ class BubOps(Synthesizer):
             await self.store.fork_tape(tape_name, fork_name)
             return VPrim(fork_name)
 
+        async def _make_tape(args: list[Val]) -> Val:
+            parent_tape, name = _maybe_val(_prim_val, args[0]), _str_val(args[1])
+            suffix = uuid.uuid4().hex[:8]
+            if parent_tape is not None:
+                tape_name = f"{parent_tape}/{name}-{suffix}"
+            else:
+                tape_name = f"{name}-{suffix}"
+            await self.store.create(tape_name)
+            return VPrim(tape_name)
+
+        async def _append_message(args: list[Val]) -> Val:
+            tape_name, content = _prim_val(args[0]), _str_val(args[1])
+            entry = TapeEntry.message({"role": "user", "content": content})
+            await self.store.append(tape_name, entry)
+            return bi.UNIT_VAL
+
         match name.surface:
             case "current_tape":
                 return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_currnent_tape))
             case "fork_tape":
                 return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(_fork_tape(vals)))
+            case "make_tape":
+                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(_make_tape(vals)))
+            case "append_message":
+                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(_append_message(vals)))
             case _:
                 return None
 

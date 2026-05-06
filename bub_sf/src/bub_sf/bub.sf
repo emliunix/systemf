@@ -8,3 +8,13 @@ prim_op current_tape :: () -> Tape
 prim_op fork_tape :: Tape
   -> Maybe String -- ^ the name of the fork
   -> Tape
+
+-- | make a new tape with optional parent
+prim_op make_tape :: Maybe Tape -- ^ optional parent tape
+  -> String -- ^ name for the new tape
+  -> Tape
+
+-- | append a user message to the tape
+prim_op append_message :: Tape
+  -> String -- ^ message content
+  -> ()

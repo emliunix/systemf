@@ -45,6 +45,10 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
 
 1. Add workspace folder to systemf search path in bub_sf, and reconsider priority handling per search path
 2. Dogfooding: migrate some skills to SystemF programs
+   - **In progress:** Add tape primitives for SystemF programs
+     - `make_tape :: Maybe Tape -> String -> Tape` — create new tape with optional parent
+     - `append_message :: Tape -> String -> ()` — append user message to tape
+     - **Change:** [`changes/39-make-tape-primitive.md`](changes/39-make-tape-primitive.md)
 3. Improve fs.read tool error message when file does not exist
 4. Audit and improve error reporting: friendly messages for common errors (e.g., file not found), detailed stack traces for internal errors only
 5. Fix sqlite tape store search
