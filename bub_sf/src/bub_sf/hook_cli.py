@@ -33,45 +33,47 @@ def register_commands(app: typer.Typer, hook_impl: Any) -> None:
         store: SQLiteForkTapeStore = hook_impl.fork_store
 
         async def _run() -> None:
-            # Read flat entries so we can separate system prompts
-            flat_entries = await store.read(tape_name)
+            try:
+                # Read flat entries so we can separate system prompts
+                flat_entries = await store.read(tape_name)
 
-            if flat_entries is None:
-                typer.secho(f"Tape '{tape_name}' not found.", err=True, fg=typer.colors.RED)
-                raise typer.Exit(1)
+                if flat_entries is None:
+                    typer.secho(f"Tape '{tape_name}' not found.", err=True, fg=typer.colors.RED)
+                    raise typer.Exit(1)
 
-            if not flat_entries:
-                typer.echo("(no entries)")
-                return
+                if not flat_entries:
+                    typer.echo("(no entries)")
+                    return
 
-            # Separate system entries from everything else
-            system_entries = [e for e in flat_entries if e.kind == "system"]
-            other_entries = [e for e in flat_entries if e.kind != "system"]
+                # Separate system entries from everything else
+                system_entries = [e for e in flat_entries if e.kind == "system"]
+                other_entries = [e for e in flat_entries if e.kind != "system"]
 
-            # Apply limit/kind filters to non-system entries if requested
-            if limit is not None or kind:
-                query = TapeQuery(store=store, tape=tape_name)
-                if kind:
-                    query = query.kinds(*kind)
-                if limit is not None:
-                    query = query.limit(limit)
-                other_entries = list(await store.fetch_all(query))
-                # Re-filter to exclude system (fetch_all respects kinds but we want to be safe)
-                other_entries = [e for e in other_entries if e.kind != "system"]
+                # Apply limit/kind filters to non-system entries if requested
+                if limit is not None or kind:
+                    query = TapeQuery(store=store, tape=tape_name)
+                    if kind:
+                        query = query.kinds(*kind)
+                    if limit is not None:
+                        query = query.limit(limit)
+                    other_entries = list(await store.fetch_all(query))
+                    # Re-filter to exclude system (fetch_all respects kinds but we want to be safe)
+                    other_entries = [e for e in other_entries if e.kind != "system"]
 
-            # First pass: group and print all non-system entries
-            if other_entries:
-                grouped = group_entries(other_entries)
-                for entry in grouped:
-                    _print_entry(entry)
+                # First pass: group and print all non-system entries
+                if other_entries:
+                    grouped = group_entries(other_entries)
+                    for entry in grouped:
+                        _print_entry(entry)
 
-            # Second pass: print the last system prompt once
-            if system_entries and not kind:
-                last_system = system_entries[-1]
-                _print_entry(last_system)
+                # Second pass: print the last system prompt once
+                if system_entries and not kind:
+                    last_system = system_entries[-1]
+                    _print_entry(last_system)
+            finally:
+                await hook_impl.framework.shutdown()
 
         asyncio.run(_run())
-        asyncio.run(hook_impl.framework.shutdown())
 
     @app.command("list-tapes")
     def list_tapes(ctx: typer.Context) -> None:
@@ -79,23 +81,25 @@ def register_commands(app: typer.Typer, hook_impl: Any) -> None:
         store: SQLiteForkTapeStore = hook_impl.fork_store
 
         async def _run() -> None:
-            tapes = await store.list_tapes_ext()
-            if not tapes:
-                typer.echo("(no tapes)")
-                return
+            try:
+                tapes = await store.list_tapes_ext()
+                if not tapes:
+                    typer.echo("(no tapes)")
+                    return
 
-            table = Table(title="Tapes", show_header=True, header_style="bold magenta")
-            table.add_column("Name", style="cyan", no_wrap=True)
-            table.add_column("Created", style="green")
+                table = Table(title="Tapes", show_header=True, header_style="bold magenta")
+                table.add_column("Name", style="cyan", no_wrap=True)
+                table.add_column("Created", style="green")
 
-            for name, meta in tapes:
-                table.add_row(name, meta["created"])
+                for name, meta in tapes:
+                    table.add_row(name, meta["created"])
 
-            console = Console()
-            console.print(table)
+                console = Console()
+                console.print(table)
+            finally:
+                await hook_impl.framework.shutdown()
 
         asyncio.run(_run())
-        asyncio.run(hook_impl.framework.shutdown())
 
     @app.command("sf-check")
     def sf_check(
@@ -125,8 +129,10 @@ def register_commands(app: typer.Typer, hook_impl: Any) -> None:
                 typer.secho(f"Error: {exc}", err=True, fg=typer.colors.RED)
                 raise typer.Exit(1)
 
-        _run()
-        asyncio.run(hook_impl.framework.shutdown())
+        try:
+            _run()
+        finally:
+            asyncio.run(hook_impl.framework.shutdown())
 
 
 def _print_entry(entry: TapeEntry | GroupedEntry) -> None:
