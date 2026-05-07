@@ -126,11 +126,7 @@ def register_commands(app: typer.Typer, hook_impl: Any) -> None:
                 raise typer.Exit(1)
 
         _run()
-        # NOTE: we intentionally do NOT call hook_impl.framework.shutdown() here.
-        # sf-check creates its own bare REPL and never touches framework resources
-        # (fork_store, channels, agents). Shutting down the framework would be
-        # unnecessary and can hang on error paths. Sibling commands that DO use
-        # framework resources (print-tape, list-tapes) call shutdown themselves.
+        asyncio.run(hook_impl.framework.shutdown())
 
 
 def _print_entry(entry: TapeEntry | GroupedEntry) -> None:
