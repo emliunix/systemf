@@ -1,0 +1,175 @@
+-- t3.sf
+-- Transformation of Thinking Traces (T3)
+-- Based on: "RAG over Thinking Traces Can Improve Reasoning Tasks"
+-- arXiv-2605.03344v1
+--
+-- This module provides three offline transformations that convert raw reasoning
+-- traces from thinking models into structured, retrieval-friendly forms.
+
+import builtins
+
+
+-- ============================================================================
+-- Base types
+-- ============================================================================
+
+-- | A raw reasoning trace produced by a thinking model (e.g., Gemini-2-thinking)
+type Trace = String
+
+
+-- ============================================================================
+-- T3 Transformation 1: Structural Normalization
+-- ============================================================================
+
+-- | A single meaningful action in the normalized reasoning procedure
+data Step = Step String
+
+-- | Normalized reasoning trace: concise step-by-step cheatsheet.
+--   Preserves the procedural structure while removing noise, detours,
+--   failed attempts, and inconsistent formatting.
+-- Format: { problem: String, steps: [String], answer: String }
+data NormalizedTrace = NormalizedTrace String (List Step) String
+
+-- | Extract the problem statement from a normalized trace
+normProblem :: NormalizedTrace -> String
+normProblem t = case t of NormalizedTrace p _ _ -> p
+
+-- | Extract the steps from a normalized trace
+normSteps :: NormalizedTrace -> List Step
+normSteps t = case t of NormalizedTrace _ s _ -> s
+
+-- | Extract the answer from a normalized trace
+normAnswer :: NormalizedTrace -> String
+normAnswer t = case t of NormalizedTrace _ _ a -> a
+
+-- | Convert a raw reasoning trace into a concise step-by-step cheatsheet.
+{-# LLM notools noskills #-}
+prim_op structural_normalize :: Trace
+  -- ^ Raw reasoning trace with noise, detours, and inconsistent formatting
+  -> NormalizedTrace
+  -- ^ Concise step-by-step cheatsheet with at most 7 meaningful steps
+
+
+-- ============================================================================
+-- T3 Transformation 2: Semantic Distillation
+-- ============================================================================
+
+-- | Semantically distilled trace: progressively abstract representations.
+--   Keeps the core insight while removing lower-level procedural detail.
+-- Format: { problem: String, pass1: String, pass2: String, pass3: String, answer: String }
+data DistilledTrace = DistilledTrace String String String String String
+
+-- | Extract the problem statement from a distilled trace
+distillProblem :: DistilledTrace -> String
+distillProblem t = case t of DistilledTrace p _ _ _ _ -> p
+
+-- | Extract pass 1 (structured outline) from a distilled trace
+distillPass1 :: DistilledTrace -> String
+distillPass1 t = case t of DistilledTrace _ p1 _ _ _ -> p1
+
+-- | Extract pass 2 (key decisions) from a distilled trace
+distillPass2 :: DistilledTrace -> String
+distillPass2 t = case t of DistilledTrace _ _ p2 _ _ -> p2
+
+-- | Extract pass 3 (core insight) from a distilled trace
+distillPass3 :: DistilledTrace -> String
+distillPass3 t = case t of DistilledTrace _ _ _ p3 _ -> p3
+
+-- | Extract the answer from a distilled trace
+distillAnswer :: DistilledTrace -> String
+distillAnswer t = case t of DistilledTrace _ _ _ _ a -> a
+
+-- | Compress a reasoning trace into progressively more abstract representations.
+{-# LLM notools noskills #-}
+prim_op semantic_distill :: Trace
+  -- ^ Raw reasoning trace with full procedural detail
+  -> DistilledTrace
+  -- ^ Three progressively abstract passes capturing the essence of the reasoning
+
+
+-- ============================================================================
+-- T3 Transformation 3: Reflection
+-- ============================================================================
+
+-- | Reflected trace: contrastive form focused on errors and recovery.
+--   Surfaces common mistakes, misleading paths, and checks needed to avoid them.
+-- Format: { problem: String, common_mistakes: String, misleading_intuitions: String,
+--           critical_checks: String, correct_approach: String, answer: String }
+data ReflectedTrace = ReflectedTrace String String String String String String
+
+-- | Extract the problem statement from a reflected trace
+reflProblem :: ReflectedTrace -> String
+reflProblem t = case t of ReflectedTrace p _ _ _ _ _ -> p
+
+-- | Extract common mistakes from a reflected trace
+reflCommonMistakes :: ReflectedTrace -> String
+reflCommonMistakes t = case t of ReflectedTrace _ cm _ _ _ _ -> cm
+
+-- | Extract misleading intuitions from a reflected trace
+reflMisleadingIntuitions :: ReflectedTrace -> String
+reflMisleadingIntuitions t = case t of ReflectedTrace _ _ mi _ _ _ -> mi
+
+-- | Extract critical checks from a reflected trace
+reflCriticalChecks :: ReflectedTrace -> String
+reflCriticalChecks t = case t of ReflectedTrace _ _ _ cc _ _ -> cc
+
+-- | Extract the correct approach from a reflected trace
+reflCorrectApproach :: ReflectedTrace -> String
+reflCorrectApproach t = case t of ReflectedTrace _ _ _ _ ca _ -> ca
+
+-- | Extract the answer from a reflected trace
+reflAnswer :: ReflectedTrace -> String
+reflAnswer t = case t of ReflectedTrace _ _ _ _ _ a -> a
+
+-- | Extract failure patterns and negative knowledge from a reasoning trace.
+{-# LLM notools noskills #-}
+prim_op reflect :: Trace
+  -- ^ Raw reasoning trace containing both successful and failed reasoning paths
+  -> ReflectedTrace
+  -- ^ Contrastive form highlighting errors and how to avoid them
+
+
+-- ============================================================================
+-- Corpus-level helpers
+-- ============================================================================
+
+-- | Apply structural normalization to a corpus of traces
+normalize_all :: List Trace -> List NormalizedTrace
+= \traces -> map structural_normalize traces
+
+-- | Apply semantic distillation to a corpus of traces
+distill_all :: List Trace -> List DistilledTrace
+= \traces -> map semantic_distill traces
+
+-- | Apply reflection to a corpus of traces
+reflect_all :: List Trace -> List ReflectedTrace
+= \traces -> map reflect traces
+
+
+-- ============================================================================
+-- Single-trace pipeline
+-- ============================================================================
+
+-- | Apply all three transformations to a single trace.
+-- Format: { normalization: NormalizedTrace, distillation: DistilledTrace, reflection: ReflectedTrace }
+data AllTransforms = AllTransforms NormalizedTrace DistilledTrace ReflectedTrace
+
+-- | Extract the normalized trace from all transforms
+allNorm :: AllTransforms -> NormalizedTrace
+allNorm t = case t of AllTransforms n _ _ -> n
+
+-- | Extract the distilled trace from all transforms
+allDistill :: AllTransforms -> DistilledTrace
+allDistill t = case t of AllTransforms _ d _ -> d
+
+-- | Extract the reflected trace from all transforms
+allReflect :: AllTransforms -> ReflectedTrace
+allReflect t = case t of AllTransforms _ _ r -> r
+
+-- | Apply all three transformations to a single trace.
+transform_all :: Trace -> AllTransforms
+= \trace ->
+    AllTransforms
+      (structural_normalize trace)
+      (semantic_distill trace)
+      (reflect trace)
