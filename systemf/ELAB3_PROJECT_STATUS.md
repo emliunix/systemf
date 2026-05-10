@@ -58,6 +58,7 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 12. **Enforce import semantics** `#issue`: We should `eval_mod` of imported modules first, so the order of evaluation is controlled by import statements. For this to work, we need to preserve the import module names and their order from program parsing through to the `Module` object.
 13. **Simplify prim ops with `VSuspend`** `#refactoring`: Currently primitive operations are wrapped in `VPartial` with manual arity tracking and session-aware finish callbacks. Introduce a `VSuspend` value constructor that suspends evaluation when a primitive is called with insufficient arguments, simplifying the `VPartial`/`SessionAwareFinish` complexity and making primitive operations more uniform.
 14. **Preserve type applications for primops** `#feature`: Currently `CoreTyApp` discards type arguments during evaluation (eval.py:201-202). Polymorphic primops like `ask :: forall a. Tape -> String -> a` cannot know the instantiated type `a`. Extend the evaluator to accumulate type applications in `VPartial` or pass them to the primop finish callback, enabling type-aware primitive operations. Needed for LLM primitives that must parse/typecheck their result based on the requested type.
+15. **Add infix operation ";" for sequential execution** `#feature`: Introduce `;` as an infix operator to denote sequential execution (e.g., `expr1; expr2`), allowing side-effecting operations to be chained in a natural order.
 
 
 ## Entry Points

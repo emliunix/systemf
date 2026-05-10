@@ -1754,6 +1754,7 @@ dependencies = [
     { name = "any-llm-sdk" },
     { name = "authlib" },
     { name = "httpx" },
+    { name = "loguru" },
     { name = "pydantic" },
 ]
 
@@ -1777,6 +1778,7 @@ requires-dist = [
     { name = "any-llm-sdk", specifier = ">=1.13.0" },
     { name = "authlib", specifier = ">=1.6.5" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "loguru", specifier = ">=0.7.3" },
     { name = "pydantic", specifier = ">=2.7.0" },
 ]
 
