@@ -6,7 +6,7 @@ from collections.abc import Iterable
 
 from republic.core.errors import ErrorKind, RepublicError
 from republic.tape.entries import TapeEntry
-from republic.tape.query import TapeQuery, T
+from republic.tape.query import TapeQuery
 
 
 @dataclass
@@ -126,7 +126,7 @@ class BuildQuery(ABC):
         """:return: tape_id for given tape_name, or None if tape does not exist"""
         ...
 
-    async def build(self, query: TapeQuery[T]) -> tuple[str, list[Any]]:
+    async def build(self, query: TapeQuery) -> tuple[str, list[Any]]:
         """
         Build SQL conditions and post-processor from TapeQuery.
         

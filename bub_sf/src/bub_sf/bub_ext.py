@@ -385,7 +385,11 @@ async def _direct_llm_call(
         list((f"arg{i}", ty, doc) for i, (ty, doc) in enumerate(zip(arg_tys, arg_docs))),
         res_ty, res_doc,
     )
-    _ = await run_agent_with_repl(session, tape_name, func_prompt, **kwargs)
+    for i in range(3):  # retry up to 3 times
+        _ = await run_agent_with_repl(session, tape_name, func_prompt, **kwargs)
+        if res[0]:
+            break
+        func_prompt = "you should call sf.repl set_return <expr> to set a proper value"
     # return captured value, discard agent output
     if res[0] is None:
         raise Exception("Expected return value to be set by test_prim body")

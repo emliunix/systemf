@@ -22,7 +22,7 @@ from bub_sf.store.fork_store import SQLiteForkTapeStore
 from bub_sf.bub_ext import BubExt
 from bub_sf.hook_cli import register_commands
 from republic.core.results import AsyncStreamEvents
-from republic.tape.store import AsyncTapeStore, TapeStore
+from republic.tape.store import AsyncTapeStore
 from systemf.elab3.reader_env import QualName
 from systemf.elab3.repl import REPL
 from systemf.elab3.repl_driver import REPLDriver
@@ -199,7 +199,7 @@ class SFHookImpl:
     #     return [self._notification_channel]
 
     @hookimpl
-    def provide_tape_store(self) -> TapeStore | AsyncTapeStore:
+    def provide_tape_store(self) -> AsyncTapeStore:
         """Provide a tape store instance for Bub's conversation recording feature."""
         return self.fork_store
 
