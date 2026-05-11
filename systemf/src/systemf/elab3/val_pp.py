@@ -1,7 +1,7 @@
 
 from .types.protocols import TyLookup
 from .types.ty import Ty, TyConApp, subst_ty
-from .types.val import VPrim, Val, Trap, VData, VClosure, VLit
+from .types.val import HasDoc, VPrim, Val, Trap, VData, VClosure, VLit
 from .types.vpartial import VPartial
 from .core_extra import lookup_data_con_by_tag
 
@@ -29,4 +29,9 @@ def pp_val(ctx: TyLookup, val: Val, ty: Ty) -> str:
             case Trap(v=v), _ if v is not None:
                 return _pp(v, ty)
             case _, _: return "<unknown>"
-    return f"{_pp(val, ty)} :: {ty}"
+    lines = []
+    match val:
+        case VPrim(v) if isinstance(v, HasDoc):
+            lines.extend(f"-- {line}" for line in v.doc().splitlines())
+    lines.append(f"{_pp(val, ty)} :: {ty}")
+    return "\n".join(lines)

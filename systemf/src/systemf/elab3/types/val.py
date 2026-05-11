@@ -1,6 +1,6 @@
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from pyrsistent import PMap, pmap
 
@@ -52,3 +52,12 @@ class Trap(Val):
 
     def set(self, v: Val) -> None:
         self.v = v
+
+
+@runtime_checkable
+class HasDoc(Protocol):
+    """Protocol for values that has doc attached."""
+
+    def doc(self) -> str:
+        """Return a human-readable documentation string for this value."""
+        ...
