@@ -102,6 +102,11 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - Requires: (1) sequential per-session message processing, (2) register/auto-trigger compaction when session idle
     - Quick approach: ChannelManager owns both serialization and idle→compact trigger
     - **Change:** [`changes/51-auto-compact-session.md`](changes/51-auto-compact-session.md)
+20. **tape_append should support role parameter** `#feature`
+    - Compaction summary needs to be appended as an assistant message entry, not user message
+    - Currently `append_message :: Tape -> String -> ()` likely defaults to user role
+    - Need to extend to support role: `append_message :: Tape -> String -> Maybe Role -> ()`
+    - Required for auto-compact to insert summary with correct role context
 
 ## Entry Points
 
