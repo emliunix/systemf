@@ -97,6 +97,11 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - Enables the compaction pattern: fork tape, summarize, handoff, append summary
     - Required for demo of context compaction as first-class operation
     - **Change:** [`changes/41-tape-handoff-primop.md`](changes/41-tape-handoff-primop.md)
+19. **Auto-compact at session level** `#feature`
+    - Compact happens at session level; channel assigns session_id
+    - Requires: (1) sequential per-session message processing, (2) register/auto-trigger compaction when session idle
+    - Quick approach: ChannelManager owns both serialization and idle→compact trigger
+    - **Change:** [`changes/51-auto-compact-session.md`](changes/51-auto-compact-session.md)
 
 ## Entry Points
 
