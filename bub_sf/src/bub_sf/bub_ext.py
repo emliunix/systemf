@@ -2,14 +2,14 @@ import uuid
 
 from pathlib import Path
 from typing import Any, TypedDict, Unpack, cast, override
-from collections.abc import Callable, Generator
+from collections.abc import AsyncIterator, Callable, Generator
 from dataclasses import dataclass
 
 from loguru import logger
 from bub.builtin.agent import Agent
 from bub.builtin.tape import get_tape_name
 from bub.framework import BubFramework
-from republic.core.results import AsyncStreamEvents
+from republic.core.results import AsyncStreamEvents, FinalEvent, Finished, StreamEvent, ToolCallNeeded, TurnResult
 
 from bub_sf.store.fork_store import SQLiteForkTapeStore
 from republic.tape.entries import TapeEntry
@@ -348,6 +348,18 @@ def _is_unit(ty: Ty) -> bool:
             return False
 
 
+def _is_reply(ty: Ty) -> bool:
+    match ty:
+        case TyConApp(name=name, args=[]) if name.surface == "Reply":
+            return True
+        case _:
+            return False
+
+
+def _mk_reply(text: str) -> Val:
+    return VData(0, [VLit(LitString(text))])
+
+
 def _prim_val(val: Val) -> Any:
     match val:
         case VPrim(s):
@@ -389,6 +401,25 @@ def _role_val(val: Val) -> str:
         case v:
             raise Exception(f"Expected Role value, got: {v}")
 
+def _event_text(result: TurnResult) -> str:
+    match result:
+        case Finished(res):
+            return res.text or ""
+        case ToolCallNeeded(result=res):
+            return res.text or ""
+
+
+def wrap_stream_for_res(stream: AsyncStreamEvents[TurnResult], res: list[Val | None]) -> AsyncStreamEvents[TurnResult]:
+    """Wrap the stream to set the return value when LLM response is received."""
+    async def _wrapped() -> AsyncIterator[StreamEvent[TurnResult]]:
+        chunks = []
+        async for event in stream:
+            match event:
+                case FinalEvent():
+                    chunks.append(_event_text(event.result))
+            yield event
+        res[0] = VLit(LitString("".join(chunks)))
+    return AsyncStreamEvents(_wrapped())
 
 async def _stream_llm_call(
     session: REPLSessionProto, tape_name: str,
@@ -401,7 +432,11 @@ async def _stream_llm_call(
         _pp_nonfunc_val(session, f"arg{i}", v, ty, doc)
         for i, (v, ty, doc) in enumerate(zip(arg_vals, arg_tys, arg_docs))
     ])
-    return VPrim((await run_agent_with_repl_and_stream(session, tape_name, prompt, **kwargs), res))
+    stream = await run_agent_with_repl_and_stream(session, tape_name, prompt, **kwargs)
+    stream = wrap_stream_for_res(stream, res)
+    # NOTE: actually it's fine, this is `LLM a`
+    # but we don't provide any function like `LLM a -> a`
+    return VPrim((stream, res))
 
 
 async def _direct_llm_call(
@@ -417,8 +452,11 @@ async def _direct_llm_call(
         res_ty, res_doc,
     )
     for i in range(3):  # retry up to 3 times
-        _ = await run_agent_with_repl(session, tape_name, func_prompt, **kwargs)
+        output = await run_agent_with_repl(session, tape_name, func_prompt, **kwargs)
         if res[0]:
+            break
+        if _is_reply(res_ty):
+            res[0] = _mk_reply(output)
             break
         func_prompt = "you should call sf.repl set_return <expr> to set a proper value"
     # return captured value, discard agent output
