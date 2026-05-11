@@ -51,7 +51,7 @@ def register_commands(app: typer.Typer, hook_impl: Any) -> None:
 
                 # Apply limit/kind filters to non-system entries if requested
                 if limit is not None or kind:
-                    query = TapeQuery(store=store, tape=tape_name)
+                    query = TapeQuery(tape=tape_name)
                     if kind:
                         query = query.kinds(*kind)
                     if limit is not None:

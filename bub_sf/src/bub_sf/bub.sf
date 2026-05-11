@@ -18,3 +18,12 @@ prim_op make_tape :: Maybe Tape -- ^ optional parent tape
 prim_op append_message :: Tape
   -> String -- ^ message content
   -> ()
+
+--| The special return type to indicate we use the LLM response
+--  as the return value and eliminate the need for a set_return call 
+--  TODO: not implemented yet
+data Reply = MkReply String
+
+un_reply :: Reply -> String = \r -> case r of
+  MkReply s -> s
+
