@@ -365,14 +365,18 @@ class SQLiteForkTapeStore(AsyncTapeStore):
             await self._core.fork(source_name, entry_id, target_name)
     
     async def fork_tape(self, source_name: str, target_name: str) -> None:
-        """Fork a tape at the last entry."""
+        """
+        Fork a tape at the last entry.
+
+        Special case when the last entry is a tool_call, we need to strip the tool_call
+        and redo the corresponding assistant message without the tool_call.
+        """
         async with self._tranx() as _:
             source_tape_id = await self._core._get_tape_id(source_name)
             if source_tape_id is None:
                 raise RepublicError(ErrorKind.NOT_FOUND, f"Source tape '{source_name}' does not exist")
             
-
-            async with self._conn.execute("""
+            async with self._conn.execute(f"""
                     SELECT {TAPE_FIELDS}
                     FROM merged_entries
                     WHERE leaf_tape_id = ?
@@ -383,8 +387,27 @@ class SQLiteForkTapeStore(AsyncTapeStore):
                 if row is None:
                     raise RepublicError(ErrorKind.INVALID_INPUT, f"Source tape '{source_name}' has no entries to fork from")
                 last_entry = _tape_entry(row)
+            if last_entry.kind == "tool_call":
+                await self._fork_and_redo_assistant(source_name, target_name, source_tape_id)
+            else:
+                await self._core.fork(source_name, last_entry.id, target_name)
 
-            await self._core.fork(source_name, last_entry.id, target_name)
+    async def _fork_and_redo_assistant(self, source_name: str, target_name: str, source_tape_id: int,):
+        async with self._conn.execute(f"""
+            SELECT {TAPE_FIELDS}
+            FROM merged_entries
+            WHERE leaf_tape_id = ? AND kind = message AND payload -> 'role' = 'assistant'
+            ORDER BY DEPTH, entry_id DESC
+            LIMIT 2
+            """, (source_tape_id,)) as cursor:
+            rows = await cursor.fetchall()
+            if any(row is None for row in rows):
+                raise RepublicError(ErrorKind.INVALID_INPUT, f"invalid tape: tool_call without an assistant entry")
+        assistant_row, fork_row = [_tape_entry(row) for row in rows]
+        assistant_row.payload.pop("tool_calls", None)
+        await self._core.fork(source_name, fork_row.id, target_name)
+        await self._core.append(target_name, assistant_row)
+
 
     # -- Read operations --
 
