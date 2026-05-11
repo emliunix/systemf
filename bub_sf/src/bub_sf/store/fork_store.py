@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import aiosqlite
-import functools
 import itertools
 import json
 import uuid
@@ -104,32 +103,6 @@ INNER JOIN anchors an ON an.tape_id = a.tape_id;
 TAPE_FIELDS = "entry_id, kind, payload, meta, date"
 
 
-class _E(Exception):
-    """Helper exception to carry frozen RepublicError through async CM."""
-
-    def __init__(self, err: RepublicError) -> None:
-        super().__init__()
-        self.err = err
-
-
-P = ParamSpec("P")
-T = TypeVar("T")
-
-
-def _unwrap_e(
-    fn: Callable[P, Coroutine[Any, Any, T]],
-) -> Callable[P, Coroutine[Any, Any, T]]:
-    """Unwrap _E wrapper back to RepublicError."""
-
-    @functools.wraps(fn)
-    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-        try:
-            return await fn(*args, **kwargs)
-        except _E as exc:
-            raise exc.err from exc
-
-    return wrapper
-
 
 # ---------------------------------------------------------------------------
 # CoreOps
@@ -162,7 +135,7 @@ class CoreOps:
             (tape_name, now),
         ) as cursor:
             if cursor.lastrowid is None:
-                raise _E(RepublicError(ErrorKind.UNKNOWN, "Failed to create tape"))
+                raise RepublicError(ErrorKind.UNKNOWN, "Failed to create tape")
             return cursor.lastrowid, 0
 
     async def create(self, name: str) -> None:
@@ -191,10 +164,10 @@ class CoreOps:
                 (tape_id, anchor_name),
             ) as cursor:
                 if await cursor.fetchone() is not None:
-                    raise _E(RepublicError(
+                    raise RepublicError(
                         ErrorKind.INVALID_INPUT,
                         f"Anchor name '{anchor_name}' already exists in merged view"
-                    ))
+                    )
 
         await self._conn.execute(
             """
@@ -225,10 +198,10 @@ class CoreOps:
         """Rename a tape."""
         tape_id = await self._get_tape_id(old_name)
         if tape_id is None:
-            raise _E(RepublicError(ErrorKind.NOT_FOUND, f"Tape '{old_name}' does not exist"))
+            raise RepublicError(ErrorKind.NOT_FOUND, f"Tape '{old_name}' does not exist")
 
         if await self._get_tape_id(new_name) is not None:
-            raise _E(RepublicError(ErrorKind.INVALID_INPUT, f"Tape '{new_name}' already exists"))
+            raise RepublicError(ErrorKind.INVALID_INPUT, f"Tape '{new_name}' already exists")
 
         await self._conn.execute(
             "UPDATE tapes SET name = ? WHERE id = ?",
@@ -243,18 +216,18 @@ class CoreOps:
         ) as cursor:
             source_row = await cursor.fetchone()
             if source_row is None:
-                raise _E(RepublicError(ErrorKind.NOT_FOUND, f"Source tape '{source_name}' does not exist"))
+                raise RepublicError(ErrorKind.NOT_FOUND, f"Source tape '{source_name}' does not exist")
 
         source_id, next_entry_id = source_row
 
         if await self._get_tape_id(target_name) is not None:
-            raise _E(RepublicError(ErrorKind.INVALID_INPUT, f"Target tape '{target_name}' already exists"))
+            raise RepublicError(ErrorKind.INVALID_INPUT, f"Target tape '{target_name}' already exists")
 
         if entry_id >= next_entry_id:
-            raise _E(RepublicError(
+            raise RepublicError(
                 ErrorKind.INVALID_INPUT,
                 f"entry_id {entry_id} is out of range (0 to {next_entry_id - 1})"
-            ))
+            )
 
         now = datetime.now(UTC).isoformat()
         await self._conn.execute(
@@ -365,71 +338,53 @@ class SQLiteForkTapeStore(AsyncTapeStore):
     # -- Core operations (with transaction management) --
 
     async def create(self, name: str) -> None:
-        @_unwrap_e
-        async def _go():
-            async with self._tranx() as _:
-                await self._core.create(name)
-        return await _go()
+        async with self._tranx() as _:
+            await self._core.create(name)
 
     async def append(self, tape: str, entry: TapeEntry) -> None:
-        @_unwrap_e
-        async def _go():
-            async with self._tranx() as _:
-                await self._core.append(tape, entry)
-        return await _go()
+        async with self._tranx() as _:
+            await self._core.append(tape, entry)
 
     async def rename(self, old_name: str, new_name: str) -> None:
-        @_unwrap_e
-        async def _go():
-            async with self._tranx() as _:            
-                await self._core.rename(old_name, new_name)
-        return await _go()
+        async with self._tranx() as _:
+            await self._core.rename(old_name, new_name)
 
     async def reset(self, tape: str) -> None:
         """Reset a tape by archiving it and creating a new empty tape."""
-        @_unwrap_e
-        async def _go():
-            async with self._tranx() as _:
-                tape_id = await self._core._get_tape_id(tape)
-                if tape_id is None:
-                    raise _E(RepublicError(ErrorKind.NOT_FOUND, f"Tape '{tape}' does not exist"))
+        async with self._tranx() as _:
+            tape_id = await self._core._get_tape_id(tape)
+            if tape_id is None:
+                raise RepublicError(ErrorKind.NOT_FOUND, f"Tape '{tape}' does not exist")
 
-                archived_name = f"{tape}_archived_{uuid.uuid4().hex[:8]}"
-                await self._core.rename(tape, archived_name)
-                await self._core.create(tape)
-        return await _go()
+            archived_name = f"{tape}_archived_{uuid.uuid4().hex[:8]}"
+            await self._core.rename(tape, archived_name)
+            await self._core.create(tape)
 
     async def fork(self, source_name: str, entry_id: int, target_name: str) -> None:
-        @_unwrap_e
-        async def _go():
-            async with self._tranx() as _:
-                await self._core.fork(source_name, entry_id, target_name)
-        return await _go()
+        async with self._tranx() as _:
+            await self._core.fork(source_name, entry_id, target_name)
     
     async def fork_tape(self, source_name: str, target_name: str) -> None:
         """Fork a tape at the last entry."""
-        @_unwrap_e
-        async def _go():
-            async with self._tranx() as _:
-                source_tape_id = await self._core._get_tape_id(source_name)
-                if source_tape_id is None:
-                    raise _E(RepublicError(ErrorKind.NOT_FOUND, f"Source tape '{source_name}' does not exist"))
-                
+        async with self._tranx() as _:
+            source_tape_id = await self._core._get_tape_id(source_name)
+            if source_tape_id is None:
+                raise RepublicError(ErrorKind.NOT_FOUND, f"Source tape '{source_name}' does not exist")
+            
 
-                async with self._conn.execute("""
-                        SELECT {TAPE_FIELDS}
-                        FROM merged_entries
-                        WHERE leaf_tape_id = ?
-                        ORDER BY DEPTH, entry_id DESC
-                        LIMIT 1
-                        """, (source_tape_id,)) as cursor:
-                    row = await cursor.fetchone()
-                    if row is None:
-                        raise _E(RepublicError(ErrorKind.INVALID_INPUT, f"Source tape '{source_name}' has no entries to fork from"))
-                    last_entry = _tape_entry(row)
+            async with self._conn.execute("""
+                    SELECT {TAPE_FIELDS}
+                    FROM merged_entries
+                    WHERE leaf_tape_id = ?
+                    ORDER BY DEPTH, entry_id DESC
+                    LIMIT 1
+                    """, (source_tape_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    raise RepublicError(ErrorKind.INVALID_INPUT, f"Source tape '{source_name}' has no entries to fork from")
+                last_entry = _tape_entry(row)
 
-                await self._core.fork(source_name, last_entry.id, target_name)
-        return await _go()
+            await self._core.fork(source_name, last_entry.id, target_name)
 
     # -- Read operations --
 
@@ -453,33 +408,30 @@ class SQLiteForkTapeStore(AsyncTapeStore):
         return entries
 
     async def fetch_all(self, query: TapeQuery) -> list[TapeEntry]:
-        @_unwrap_e
-        async def _go():
-            async with self._tranx() as conn:
-                match await self._query.build(query):
-                    case (where_clause, params_):
-                        sql = f"""
-                        SELECT {TAPE_FIELDS}
-                        FROM merged_entries
-                        WHERE {where_clause}
-                        ORDER BY depth DESC, entry_id
-                        """
-                        params = params_
+        async with self._tranx() as conn:
+            match await self._query.build(query):
+                case (where_clause, params_):
+                    sql = f"""
+                    SELECT {TAPE_FIELDS}
+                    FROM merged_entries
+                    WHERE {where_clause}
+                    ORDER BY depth DESC, entry_id
+                    """
+                    params = params_
 
-                limit = query._limit
-                if limit is not None:
-                    sql = sql + "\nLIMIT ?"
-                    params = params_ + [limit]
+            limit = query._limit
+            if limit is not None:
+                sql = sql + "\nLIMIT ?"
+                params = params_ + [limit]
 
-                async with conn.execute(sql, params) as cursor:
-                    entries: list[TapeEntry] = []
-                    async for row in cursor:
-                        entries.append(_tape_entry(row))
+            async with conn.execute(sql, params) as cursor:
+                entries: list[TapeEntry] = []
+                async for row in cursor:
+                    entries.append(_tape_entry(row))
 
-                # limit filter
+            # limit filter
 
-                return entries
-        return await _go()
+            return entries
 
     async def list_tapes(self) -> list[str]:
         async with self._conn.execute("SELECT name FROM tapes ORDER BY name") as cursor:
