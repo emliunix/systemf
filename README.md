@@ -1,6 +1,6 @@
-# The Agentic scripting language
+# The Agentic Functional language
 
-**Agentic thinking, organized, by humans and agents.**
+**Agentic thinking, organized by agents themselves.**
 
 A language designed to be small, focused on REPL usage with fork support.
 
@@ -11,7 +11,7 @@ So LLM actions and plain programs can be mixed and inter-communicate freely.
 
 The initial goal of the project is to organize LLM thinking programmatically.
 So we also leverage the tape of **bub** and expose it as primitives to control the context,
-by both programs and LLM and LLM written programs.
+by both programs and LLM and programs written by LLM.
 
 ## Example: simple LLM call as a function
 
