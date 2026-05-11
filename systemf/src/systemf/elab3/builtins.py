@@ -47,6 +47,10 @@ BUILTIN_MK_REF = Name("builtins", "mk_ref", 30)
 BUILTIN_SET_REF = Name("builtins", "set_ref", 31)
 BUILTIN_GET_REF = Name("builtins", "get_ref", 32)
 
+BUILTIN_IGNORE = Name("builtins", "ignore", 33)
+
+BUILTIN_SEQ = Name("builtins", "seq", 34)
+
 BUILTIN_ENDS = 1000
 
 
@@ -84,6 +88,8 @@ BUILTIN_NAMES: dict[str, list[Name]] = {
         BUILTIN_MK_REF,
         BUILTIN_SET_REF,
         BUILTIN_GET_REF,
+        BUILTIN_IGNORE,
+        BUILTIN_SEQ,
     ]
 }
 
@@ -102,6 +108,7 @@ BUILTIN_BIN_OPS = {
     "||": BUILTIN_BOOL_OR,
     "++": BUILTIN_STRING_CONCAT,
     ":": BUILTIN_LIST_CONS,
+    ";": BUILTIN_SEQ,
 }
 
 

@@ -230,7 +230,7 @@ class Unifier(TcCtx, ABC):
                 res_ty = self.make_meta(gv_lvl=lvl)
                 self.unify(ty, TyFun(arg_ty, res_ty))
                 return (arg_ty, res_ty)
-            case _: raise Exception(f"Cant unify to function type, got: {ty}")
+            case _: raise Exception(f"Cannot unify to function type, got: {ty}")
 
     def exp_to_ty(self, exp: Expect) -> Ty:
         match exp:

@@ -295,13 +295,16 @@ class TypeChecker(Unifier):
             return multiple(groups, self._binding_group, cb)
     
     def _binding_group(self, group: SccGroup[Binding], cb: CB[R]) -> tuple[BindingGroup, R]:
-        if group.is_recursive:
-            if any(isinstance(b.name, AnnotName) for b in group.bindings):
-                # this should be guaranteed by the run_scc edges construction in bindings()
-                raise Exception("recursive bindings cannot have type annotations")
-            binding_grp: BindingGroup = self._rec_group(group.bindings)
-        else:
-            binding_grp: BindingGroup = self._nonrec_group(group.bindings)
+        try:
+            if group.is_recursive:
+                if any(isinstance(b.name, AnnotName) for b in group.bindings):
+                    # this should be guaranteed by the run_scc edges construction in bindings()
+                    raise Exception("recursive bindings cannot have type annotations")
+                binding_grp: BindingGroup = self._rec_group(group.bindings)
+            else:
+                binding_grp: BindingGroup = self._nonrec_group(group.bindings)
+        except Exception as e:
+            raise Exception(f"Error in binding group {[name_of(b.name) for b in group.bindings]}: {e}") from e
 
         def _mk_env(group: BindingGroup) -> list[tuple[Name, TyThing]]:
             match group:
