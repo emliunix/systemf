@@ -1,6 +1,6 @@
 import uuid
 
-from os import path
+from pathlib import Path
 from typing import Any, TypedDict, Unpack, cast, override
 from collections.abc import Callable, Generator
 from dataclasses import dataclass
@@ -38,7 +38,7 @@ class BubExt(Ext):
 
     @override
     def search_paths(self) -> list[str]:
-        return [path.basename(__file__)]
+        return [str(Path(__file__).parent.resolve())]
 
     @override
     def synthesizers(self) -> list[dict[str, Synthesizer] | Synthesizer] | None:

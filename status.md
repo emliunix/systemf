@@ -119,6 +119,10 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
      - **Change:** [`changes/39-make-tape-primitive.md`](changes/39-make-tape-primitive.md)
 22. **Continue dogfooding: migrate additional skills to SystemF programs** `#dogfooding`
      - Migrate other bub tools and framework components to SystemF programs beyond tape primitives
+23. **sf-check bub missing** #bug
+     - sf-check doesn't include bub.sf to search paths by default.
+     - the problem is BubExt requires TapeStore and BubFrameworkd for actually calling, though for check purpose it's not needed.
+     - I'm not sure, maybe we can make search path a static field of Ext.
 
 ## Entry Points
 

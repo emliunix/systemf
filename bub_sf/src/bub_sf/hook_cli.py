@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
-
 import typer
+
+from typing import Any
+from pathlib import Path
+
 from republic.tape.entries import TapeEntry
 from republic.tape.query import TapeQuery
 
-from bub_sf.tape_grouping import GroupedEntry, group_entries
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from bub_sf.store.fork_store import SQLiteForkTapeStore
 from systemf.elab3.repl import REPL
-
+from bub_sf.tape_grouping import GroupedEntry, group_entries
+from bub_sf.store.fork_store import SQLiteForkTapeStore
 
 def register_commands(app: typer.Typer, hook_impl: Any) -> None:
     """Register tape CLI commands onto the Typer app."""
@@ -114,7 +115,8 @@ def register_commands(app: typer.Typer, hook_impl: Any) -> None:
                 typer.secho("Error: invalid module name", err=True, fg=typer.colors.RED)
                 raise typer.Exit(1)
 
-            repl = REPL(search_paths=search_paths)
+            search_paths_ = [str(Path(__file__).parent.resolve())] + search_paths
+            repl = REPL(search_paths=search_paths_)
             try:
                 mod = repl.load(module)
                 typer.secho(f"OK: {module}", fg=typer.colors.GREEN)
