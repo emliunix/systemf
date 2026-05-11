@@ -13,6 +13,7 @@ from republic.core.results import AsyncStreamEvents
 
 from bub_sf.store.fork_store import SQLiteForkTapeStore
 from republic.tape.entries import TapeEntry
+from republic.tape.manager import AsyncTapeManager
 from systemf.elab3 import builtins as bi
 from systemf.elab3.val_pp import pp_val
 from systemf.elab3.types.protocols import Ext, REPLSessionProto, Synthesizer
@@ -52,6 +53,45 @@ class BubOps(Synthesizer):
     
     def __init__(self, store: SQLiteForkTapeStore) -> None:
         self.store = store
+        self.mgr = AsyncTapeManager(store=store)
+
+    def _current_tape(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        if session is None:
+            raise Exception("current_tape must be called with a valid session")
+        return VPrim(get_tape_name(session.state["bub_state"]))
+
+    async def _fork_tape(self, args: list[Val]) -> Val:
+        tape_name, fork_name = _prim_val(args[0]), _maybe_val(_str_val, args[1])
+        fork_name = fork_name or f"{tape_name}/fork_{uuid.uuid4().hex[:8]}"
+        await self.store.fork_tape(tape_name, fork_name)
+        return VPrim(fork_name)
+
+    async def _make_tape(self, args: list[Val]) -> Val:
+        parent_tape, name = _maybe_val(_prim_val, args[0]), _str_val(args[1])
+        suffix = uuid.uuid4().hex[:8]
+        if parent_tape is not None:
+            tape_name = f"{parent_tape}/{name}-{suffix}"
+        else:
+            tape_name = f"{name}-{suffix}"
+        await self.store.create(tape_name)
+        return VPrim(tape_name)
+
+    async def _tape_append(self, args: list[Val]) -> Val:
+        tape_name = _prim_val(args[0])
+        role_tag = _role_val(args[1])
+        content = _str_val(args[2])
+        message = {"role": role_tag, "content": content}
+        if role_tag == "assistant":
+            message["reasoning_content"] = ""
+        entry = TapeEntry.message(message)
+        await self.store.append(tape_name, entry)
+        return bi.UNIT_VAL
+
+    async def _tape_handoff(self, args: list[Val]) -> Val:
+        tape_name = _prim_val(args[0])
+        name = _str_val(args[1])
+        await self.mgr.handoff(tape_name, name)
+        return bi.UNIT_VAL
 
     # TODO: we should refine session to TyLookup, cause get_primop is called on loading,
     # the session might be different from that of evaluting the op. so we need to restrcit
@@ -60,42 +100,17 @@ class BubOps(Synthesizer):
     def get_primop(self, name: Name, thing: AnId, session: REPLSessionProto) -> Val | None:
         arg_tys, res_ty = split_fun(thing.id.ty)
 
-        def _currnent_tape(args: list[Val], session: REPLSessionProto | None) -> Val:
-            if session is None:
-                raise Exception("current_tape must be called with a valid session")
-            return VPrim(get_tape_name(session.state["bub_state"]))
-
-        async def _fork_tape(args: list[Val]) -> Val:
-            tape_name, fork_name = _prim_val(args[0]), _maybe_val(_str_val, args[1])
-            fork_name = fork_name or f"{tape_name}/fork_{uuid.uuid4().hex[:8]}"
-            await self.store.fork_tape(tape_name, fork_name)
-            return VPrim(fork_name)
-
-        async def _make_tape(args: list[Val]) -> Val:
-            parent_tape, name = _maybe_val(_prim_val, args[0]), _str_val(args[1])
-            suffix = uuid.uuid4().hex[:8]
-            if parent_tape is not None:
-                tape_name = f"{parent_tape}/{name}-{suffix}"
-            else:
-                tape_name = f"{name}-{suffix}"
-            await self.store.create(tape_name)
-            return VPrim(tape_name)
-
-        async def _append_message(args: list[Val]) -> Val:
-            tape_name, content = _prim_val(args[0]), _str_val(args[1])
-            entry = TapeEntry.message({"role": "user", "content": content})
-            await self.store.append(tape_name, entry)
-            return bi.UNIT_VAL
-
         match name.surface:
             case "current_tape":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_currnent_tape))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._current_tape))
             case "fork_tape":
-                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(_fork_tape(vals)))
+                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(self._fork_tape(vals)))
             case "make_tape":
-                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(_make_tape(vals)))
-            case "append_message":
-                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(_append_message(vals)))
+                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(self._make_tape(vals)))
+            case "tape_append":
+                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(self._tape_append(vals)))
+            case "tape_handoff":
+                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(self._tape_handoff(vals)))
             case _:
                 return None
 
@@ -357,6 +372,22 @@ def _maybe_val(inside: Callable[[Val], Any], val: Val) -> Any | None:
             return inside(inner)
         case v:
             raise Exception(f"Expected Maybe value, got: {v}")
+
+
+def _role_val(val: Val) -> str:
+    """Extract role string from Role data constructor.
+    
+    data Role = User | Assistant
+    User      -> VData(0, []) -> "user"
+    Assistant -> VData(1, []) -> "assistant"
+    """
+    match val:
+        case VData(0, []):
+            return "user"
+        case VData(1, []):
+            return "assistant"
+        case v:
+            raise Exception(f"Expected Role value, got: {v}")
 
 
 async def _stream_llm_call(

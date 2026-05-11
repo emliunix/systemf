@@ -14,9 +14,18 @@ prim_op make_tape :: Maybe Tape -- ^ optional parent tape
   -> String -- ^ name for the new tape
   -> Tape
 
--- | append a user message to the tape
-prim_op append_message :: Tape
-  -> String -- ^ message content
+-- | Message role for tape entries
+data Role = User | Assistant
+
+-- | append a message to the tape
+prim_op tape_append :: Tape
+  -> Role    -- ^ role: User or Assistant
+  -> String  -- ^ message content
+  -> ()
+
+-- | Create a handoff anchor on the tape (truncates context at this point)
+prim_op tape_handoff :: Tape
+  -> String -- ^ handoff name/reason
   -> ()
 
 --| The special return type to indicate we use the LLM response
