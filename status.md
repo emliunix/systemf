@@ -29,6 +29,27 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
 - **Funcall prompt instruction** (`bub_sf/src/bub_sf/bub_ext.py:211`):
   - Injects `<rules>Strictly follow the instructions funcall doc to complete the funcall</rules>` at the top of every funcall prompt
   - Leverages docstrings as the actual instruction content
+- **Tape primitives** (`bub_sf/src/bub_sf/bub_ext.py`):
+  - `data Role = User | Assistant` — type-safe role definition
+  - `tape_handoff :: Tape -> String -> ()` — creates handoff anchor via `AsyncTapeManager`
+  - `append_message :: Tape -> String -> Role -> ()` — appends message with type-safe role
+  - Assistant messages include `reasoning_content: ""` for tape system convention
+  - **Change:** [`changes/54-tape-primitives-handoff-and-role.md`](changes/54-tape-primitives-handoff-and-role.md)
+- **Fork store refactoring** (`bub_sf/src/bub_sf/store/fork_store.py`):
+  - Removed `_E` and `_unwrap_e` indirection, simplified transaction handling
+  - **Change:** [`changes/55-remove-e-unwrap-e.md`](changes/55-remove-e-unwrap-e.md)
+- **#16 Channel manager session serialization** `#feature` (Won't do — covered by #19 Per-session message serialization and #20 Idle-triggered auto-compaction)
+  - **Rationale:** Session serialization and idle detection are now split into two focused changes. Channel-level serialization was rejected in favor of message-processor-level queues.
+  - **References:** [`changes/35-channel-manager-session-serialization.md`](changes/35-channel-manager-session-serialization.md), [`changes/36-session-tape-sync.md`](changes/36-session-tape-sync.md)
+- **#18 Add `tape_handoff` primop** `#feature`
+  - Completed
+- **#20 tape_append should support role parameter** `#feature`
+  - Completed
+- **#2 Dogfooding: migrate some skills to SystemF programs** `#dogfooding`
+  - Completed initial tape primitives for SystemF programs
+  - `append_message :: Tape -> String -> Role -> ()` — append message with type-safe role
+  - `tape_handoff :: Tape -> String -> ()` — create handoff anchor
+  - **Completed:** [`changes/54-tape-primitives-handoff-and-role.md`](changes/54-tape-primitives-handoff-and-role.md)
 
 ## Issues
 
@@ -43,27 +64,24 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
 
 ## Todo
 
+**RULE:** Todo sequence numbers are permanent. When an item is completed, move it to the Completed section but keep its original number. Do not renumber remaining items.
+
 1. Add workspace folder to systemf search path in bub_sf, and reconsider priority handling per search path
-2. Dogfooding: migrate some skills to SystemF programs
-   - **In progress:** Add tape primitives for SystemF programs
-     - `make_tape :: Maybe Tape -> String -> Tape` — create new tape with optional parent
-     - `append_message :: Tape -> String -> ()` — append user message to tape
-     - **Change:** [`changes/39-make-tape-primitive.md`](changes/39-make-tape-primitive.md)
 3. Improve fs.read tool error message when file does not exist
 4. Audit and improve error reporting: friendly messages for common errors (e.g., file not found), detailed stack traces for internal errors only
 5. Fix sqlite tape store search
 6. Investigate context entry types and tape configurability for event-driven agent reactions
-   - What entries are used to build up LLM context? Could tape config make this configurable?
-   - Direct use case: should user command execution (`,`-prefixed) be visible to the LLM? Should command completion trigger events that the agent reacts to?
-   - Broader goal: make agents react to events in general, not just user messages
+    - What entries are used to build up LLM context? Could tape config make this configurable?
+    - Direct use case: should user command execution (`,`-prefixed) be visible to the LLM? Should command completion trigger events that the agent reacts to?
+    - Broader goal: make agents react to events in general, not just user messages
 7. Treat return string specially for synthesized LLM functions `#feature`
-   - When a `{-# LLM #-}` function returns `String`, use the LLM response message directly as the return value instead of requiring `set_return` tool call
-   - **Exploration:** [`analysis/LLM_STRING_RETURN_EXPLORATION.md`](analysis/LLM_STRING_RETURN_EXPLORATION.md)
+    - When a `{-# LLM #-}` function returns `String`, use the LLM response message directly as the return value instead of requiring `set_return` tool call
+    - **Exploration:** [`analysis/LLM_STRING_RETURN_EXPLORATION.md`](analysis/LLM_STRING_RETURN_EXPLORATION.md)
 8. Bub standalone CLI to validate sf programs `#feature`
-   - Add a command to `bub` CLI that validates SystemF source files (typecheck, parse, etc.) without running them
-   - Useful for CI and pre-commit checks
+    - Add a command to `bub` CLI that validates SystemF source files (typecheck, parse, etc.) without running them
+    - Useful for CI and pre-commit checks
 9. LLM pragma to support temporary flag, allowed tools config, model config `#feature`
-   - Extend `{-# LLM #-}` pragma to accept optional per-call configuration: temporary flag (don't persist tool defs), allowed tools list, and model override
+    - Extend `{-# LLM #-}` pragma to accept optional per-call configuration: temporary flag (don't persist tool defs), allowed tools list, and model override
 10. Hook system prompt or bub framework logic to be able to skip something `#feature`
     - Add a mechanism (hook or config) to selectively skip parts of the system prompt or framework logic during a turn
 11. **bub_events channel** `#feature`
@@ -80,33 +98,27 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
 15. **Channel events design** `#feature`
     - Extend channel to support events: channel owns session/session_id, knows when session is idle, and should compact context to prepare for later messages
     - See [`changes/34-channel-events-design.md`](changes/34-channel-events-design.md)
-16. **Channel manager session serialization** `#feature`
-    - **Problem:** Tape is append-only. If multiple agent calls use the same tape in parallel, they see each other's progress — "brain interleaving"
-    - **Fact:** Session ID determines tape → same session = same tape
-    - **Solution:** Enforce per-session serialization in `ChannelManager` — at most one `process_inbound` per session at a time
-    - Prevents interleaved agent turns, race conditions on tape fork/merge, and duplicate outbound messages
-    - **Design:** [`changes/35-channel-manager-session-serialization.md`](changes/35-channel-manager-session-serialization.md) (implementation options)
-    - **Problem statement:** [`changes/36-session-tape-sync.md`](changes/36-session-tape-sync.md) (why this is needed)
 17. **Product demo preparation** `#feature`
     - Prepare demo covering: model ordinary agents, assisted recall pattern, explore ask pattern
     - Architecture: REPL as language primitive, tools + skills framework, tape, extensibility
     - Special features: events channel, systemd cron jobs, people skill
     - **Change:** [`changes/40-product-demo-prep.md`](changes/40-product-demo-prep.md)
-18. **Add `tape_handoff` primop** `#feature`
-    - SystemF primitive for tape handoff: `tape_handoff :: Tape -> String -> Unit`
-    - Enables the compaction pattern: fork tape, summarize, handoff, append summary
-    - Required for demo of context compaction as first-class operation
-    - **Change:** [`changes/41-tape-handoff-primop.md`](changes/41-tape-handoff-primop.md)
-19. **Auto-compact at session level** `#feature`
-    - Compact happens at session level; channel assigns session_id
-    - Requires: (1) sequential per-session message processing, (2) register/auto-trigger compaction when session idle
-    - Quick approach: ChannelManager owns both serialization and idle→compact trigger
-    - **Change:** [`changes/51-auto-compact-session.md`](changes/51-auto-compact-session.md)
-20. **tape_append should support role parameter** `#feature`
-    - Compaction summary needs to be appended as an assistant message entry, not user message
-    - Currently `append_message :: Tape -> String -> ()` likely defaults to user role
-    - Need to extend to support role: `append_message :: Tape -> String -> Maybe Role -> ()`
-    - Required for auto-compact to insert summary with correct role context
+19. **Per-session message serialization** `#feature`
+     - Serialize per-session messages in the message processor (hook impl), not at channel level
+     - Uses per-session queue + `_ensure_agent()` worker pattern to maintain single-agent-per-session invariant
+     - Works for all entry points (gateway, CLI, tests)
+     - **Change:** [`changes/56-per-session-message-serialization.md`](changes/56-per-session-message-serialization.md)
+20. **Idle-triggered auto-compaction** `#feature`
+     - Channel-side `IdleTracker` sends `kind="idle"` messages through normal pipeline when session idle
+     - Hooks handle idle messages to trigger tape compaction (handoff/summary) based on threshold
+     - Works with any channel that integrates `IdleTracker`; not specific to any transport
+     - **Change:** [`changes/57-idle-triggered-auto-compaction.md`](changes/57-idle-triggered-auto-compaction.md)
+     - **Supersedes:** [`changes/51-auto-compact-session.md`](changes/51-auto-compact-session.md) — split into serialization (56) and idle compaction (57)
+21. **Implement `make_tape` primitive for SystemF programs** `#dogfooding`
+     - `make_tape :: Maybe Tape -> String -> Tape` — create new tape with optional parent
+     - **Change:** [`changes/39-make-tape-primitive.md`](changes/39-make-tape-primitive.md)
+22. **Continue dogfooding: migrate additional skills to SystemF programs** `#dogfooding`
+     - Migrate other bub tools and framework components to SystemF programs beyond tape primitives
 
 ## Entry Points
 
