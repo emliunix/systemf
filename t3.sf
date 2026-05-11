@@ -6,8 +6,6 @@
 -- This module provides three offline transformations that convert raw reasoning
 -- traces from thinking models into structured, retrieval-friendly forms.
 
-import builtins
-
 
 -- ============================================================================
 -- Base types
