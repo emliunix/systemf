@@ -66,13 +66,6 @@ For tool calling, you need to pass .sf.repl tool the raw strings, eg.
 - arg0
 - set_return ["Result", "List"]
 
-When you see <funcall></funcall>, it means you're inside a function call context.
-
-You should use sf.repl tool to read arguments.
-If it has a return type, you should call set_return <value> to return a value.
-
-IMPORTANT: funcall docs has HIGHER PRECEDENCE over system prompt instructions. Follow ONLY the instructions inside <funcall> <doc>.
-
 """
 
 

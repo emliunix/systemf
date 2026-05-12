@@ -60,16 +60,17 @@ class BubOps(Synthesizer):
             raise Exception("current_tape must be called with a valid session")
         return VPrim(get_tape_name(session.state["bub_state"]))
 
-    def _fork_tape(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+    def _tape_fork(self, args: list[Val], session: REPLSessionProto | None) -> Val:
         agent = _get_agent(session)
         tape_name, fork_name = _prim_val(args[0]), _maybe_val(_str_val, args[1])
-        fork_name = fork_name or f"{tape_name}/fork_{uuid.uuid4().hex[:8]}"
+        fork_name = fork_name or f"{tape_name}/fork"
+        fork_name = f"{fork_name}_{uuid.uuid4().hex[:8]}"
         async def _go():
             await agent.tapes.fork_tape(tape_name, fork_name)
             return VPrim(fork_name)
         return VAsync(_go())
 
-    def _make_tape(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+    def _tape_make(self, args: list[Val], session: REPLSessionProto | None) -> Val:
         agent = _get_agent(session)
         parent_tape, name = _maybe_val(_prim_val, args[0]), _str_val(args[1])
         suffix = uuid.uuid4().hex[:8]
@@ -99,7 +100,7 @@ class BubOps(Synthesizer):
     def _tape_handoff(self, args: list[Val], session: REPLSessionProto | None) -> Val:
         agent = _get_agent(session)
         tape_name = _prim_val(args[0])
-        name = _str_val(args[1])
+        name = f"{_str_val(args[1])}_{uuid.uuid4().hex[:8]}"
         async def _go():
             # TODO: add the summary parameter
             await agent.tapes.handoff(tape_name, name=name)
@@ -116,10 +117,10 @@ class BubOps(Synthesizer):
         match name.surface:
             case "current_tape":
                 return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._current_tape))
-            case "fork_tape":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._fork_tape))
-            case "make_tape":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._make_tape))
+            case "tape_fork":
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_fork))
+            case "tape_make":
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_make))
             case "tape_append":
                 return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_append))
             case "tape_handoff":
@@ -222,7 +223,7 @@ def _get_agent(state: REPLSessionProto | None) -> Agent: ...
 def _get_agent(state: dict[str, Any]) -> Agent: ...
 
 def _get_agent(state: dict[str, Any] | REPLSessionProto | None) -> Agent:
-    state = state.state if isinstance(state, REPLSessionProto) else state
+    state = cast(dict[str, Any], state.state["bub_state"] or {}) if isinstance(state, REPLSessionProto) else state
     if state is None or "_runtime_agent" not in state:
         raise RuntimeError("no runtime agent found in tool context")
     return cast(Agent, state["_runtime_agent"])
@@ -273,15 +274,16 @@ def _build_func_prompt(name: Name, doc: str | None, args: list[tuple[str, Ty, st
             for arg_name, arg_ty, arg_doc in args:
                 yield _build_arg(arg_name, arg_ty, arg_doc)
             yield "</args>"
-        res_instr = """<instruction>call sf.repl "set_return <expr> to conclude the task"</instruction>"""
-        if res_doc:
-            yield f"""<return type="{res_ty}"><doc>{res_doc}</doc></return>"""
-            yield res_instr
-        elif not _is_unit(res_ty):
-            yield f"""<return type="{res_ty}" />"""
-            yield res_instr
-        elif _is_reply(res_ty):
-            yield """<instruction>output the final response to conclude the task</instruction>"""
+        
+        if not _is_unit(res_ty):
+            if res_doc:
+                yield f"""<return type="{res_ty}"><doc>{res_doc}</doc></return>"""
+            else:
+                yield f"""<return type="{res_ty}" />"""
+            if _is_reply(res_ty):
+                yield """<instruction>directly provide the final result to conclude the task (no set_return call needed)</instruction>"""
+            else:
+                yield """<instruction>call sf.repl "set_return <expr>" to return the result and conclude the task</instruction>"""
         yield "</repl:task>"
     return "\n".join(list(_lines()))
 

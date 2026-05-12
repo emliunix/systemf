@@ -5,12 +5,12 @@ prim_type Tape
 prim_op current_tape :: () -> Tape
 
 -- | fork the tape
-prim_op fork_tape :: Tape
+prim_op tape_fork :: Tape
   -> Maybe String -- ^ the name of the fork
   -> Tape
 
 -- | make a new tape with optional parent
-prim_op make_tape :: Maybe Tape -- ^ optional parent tape
+prim_op tape_make :: Maybe Tape -- ^ optional parent tape
   -> String -- ^ name for the new tape
   -> Tape
 
@@ -34,3 +34,16 @@ data Reply = MkReply String
 
 un_reply :: Reply -> String = \r -> case r of
   MkReply s -> s
+
+{-# LLM notools #-}
+-- | summarize the conversation with the given instruction
+prim_op summarize :: Tape -> String -- ^ the instruction for the summarization
+    -> Reply -- ^ no need to call set_return
+
+compact :: Maybe String -> () = \msg ->
+    let tape = current_tape ()
+        instr = "summarize all the discussions so far\n" ++ (fromMaybe "" msg)
+        summary = un_reply (summarize (tape_fork tape (Just "for/summarize")) instr)
+    in
+        -- hand crafted id monad to sequence the ops
+        (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "compaction")

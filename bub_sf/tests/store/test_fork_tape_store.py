@@ -141,7 +141,7 @@ class TestCoreOperations:
         for e in entries:
             await store.append("main", e)
 
-        result = await store.fetch_all(TapeQuery(tape="main", store=store))
+        result = await store.fetch_all(TapeQuery(tape="main"))
         assert len(result) == 3
         assert [e.id for e in result] == [0, 1, 2]
         assert result == entries
@@ -441,7 +441,7 @@ class TestMergedView:
         await store.fork("parent", parent_entries[-1].id, "child")
         await store.append("child", make_entry(3))
 
-        result = await store.fetch_all(TapeQuery(tape="child", store=store).after_anchor("a1"))
+        result = await store.fetch_all(TapeQuery(tape="child").after_anchor("a1"))
         assert [e.id for e in result] == [2, 3]
 
     @pytest.mark.asyncio
@@ -471,7 +471,7 @@ class TestQueryFiltering:
         await store.append("main", TapeEntry(id=1, kind="anchor", payload={"name": "a1"}, date="2026-05-01T12:00:00+00:00"))
         await store.append("main", make_entry(2, kind="message"))
 
-        result = await store.fetch_all(TapeQuery(tape="main", store=store).kinds("message"))
+        result = await store.fetch_all(TapeQuery(tape="main").kinds("message"))
         assert [e.id for e in result] == [0, 2]
         assert all(e.kind == "message" for e in result)
 
@@ -481,7 +481,7 @@ class TestQueryFiltering:
         for i in range(5):
             await store.append("main", make_entry(i))
 
-        result = await store.fetch_all(TapeQuery(tape="main", store=store).limit(2))
+        result = await store.fetch_all(TapeQuery(tape="main").limit(2))
         assert len(result) == 2
         assert [e.id for e in result] == [0, 1]
 
@@ -494,7 +494,7 @@ class TestQueryFiltering:
         await store.append("main", TapeEntry(id=3, kind="anchor", payload={"name": "a2"}, date="2026-05-01T12:00:00+00:00"))
         await store.append("main", make_entry(4))
 
-        result = await store.fetch_all(TapeQuery(tape="main", store=store).after_anchor("a1"))
+        result = await store.fetch_all(TapeQuery(tape="main").after_anchor("a1"))
         assert [e.id for e in result] == [2, 3, 4]
 
     @pytest.mark.asyncio
@@ -508,7 +508,7 @@ class TestQueryFiltering:
         await store.append("main", make_entry(5, kind="message"))
 
         result = await store.fetch_all(
-            TapeQuery(tape="main", store=store).kinds("message").after_anchor("a1").limit(1)
+            TapeQuery(tape="main").kinds("message").after_anchor("a1").limit(1)
         )
         assert [e.id for e in result] == [2]
 
@@ -522,7 +522,7 @@ class TestQueryFiltering:
         await store.append("child", make_entry(2))
         await store.append("child", make_entry(3))
 
-        result = await store.fetch_all(TapeQuery(tape="child", store=store))
+        result = await store.fetch_all(TapeQuery(tape="child"))
         assert [e.id for e in result] == [0, 1, 2, 3]
 
     @pytest.mark.asyncio
@@ -535,7 +535,7 @@ class TestQueryFiltering:
         await store.append("child", make_entry(2))
         await store.append("child", make_entry(3))
 
-        result = await store.fetch_all(TapeQuery(tape="child", store=store).limit(2))
+        result = await store.fetch_all(TapeQuery(tape="child").limit(2))
         assert [e.id for e in result] == [0, 1]
 
 
@@ -556,7 +556,7 @@ class TestAnchors:
         await store.append("child", make_entry(3))
         await store.append("child", make_entry(4))
 
-        result = await store.fetch_all(TapeQuery(tape="child", store=store).after_anchor("a1"))
+        result = await store.fetch_all(TapeQuery(tape="child").after_anchor("a1"))
         assert [e.id for e in result] == [2, 3, 4]
 
     @pytest.mark.asyncio
@@ -577,12 +577,12 @@ class TestAnchors:
         await store.append("main", TapeEntry(id=0, kind="anchor", payload={"name": "a1"}, date="2026-05-01T12:00:00+00:00"))
 
         # Verify anchor exists by querying after it
-        result = await store.fetch_all(TapeQuery(tape="main", store=store).after_anchor("a1"))
+        result = await store.fetch_all(TapeQuery(tape="main").after_anchor("a1"))
         assert result == []
 
         # Add another entry and verify after_anchor works
         await store.append("main", make_entry(1))
-        result = await store.fetch_all(TapeQuery(tape="main", store=store).after_anchor("a1"))
+        result = await store.fetch_all(TapeQuery(tape="main").after_anchor("a1"))
         assert [e.id for e in result] == [1]
 
     @pytest.mark.asyncio
@@ -604,7 +604,7 @@ class TestAnchors:
         await store.append("level2", make_entry(4))
 
         # Query level2 for entries after anchor "a1" (which is in root)
-        result = await store.fetch_all(TapeQuery(tape="level2", store=store).after_anchor("a1"))
+        result = await store.fetch_all(TapeQuery(tape="level2").after_anchor("a1"))
         assert [e.id for e in result] == [2, 3, 4]
 
     @pytest.mark.asyncio

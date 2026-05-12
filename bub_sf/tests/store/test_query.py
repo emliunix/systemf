@@ -203,7 +203,7 @@ class MockBuildQuery(BuildQuery):
 async def test_build_empty_query():
     """Empty query still has tape_name condition."""
     builder = MockBuildQuery()
-    query = TapeQuery(tape="test", store=None)
+    query = TapeQuery(tape="test")
     sql, params = await builder.build(query)
     assert sql == "leaf_tape_id = ?"
     assert params == [1]
@@ -213,7 +213,7 @@ async def test_build_empty_query():
 async def test_build_kinds_only():
     """Query with kinds only."""
     builder = MockBuildQuery()
-    query = TapeQuery(tape="test", store=None).kinds("message", "event")
+    query = TapeQuery(tape="test").kinds("message", "event")
     sql, params = await builder.build(query)
     assert "leaf_tape_id = ?" in sql
     assert "kind IN" in sql
@@ -224,7 +224,7 @@ async def test_build_kinds_only():
 async def test_build_after_anchor():
     """Query with after_anchor."""
     builder = MockBuildQuery(anchors_map={"start": 10})
-    query = TapeQuery(tape="test", store=None).after_anchor("start")
+    query = TapeQuery(tape="test").after_anchor("start")
     sql, params = await builder.build(query)
     assert "entry_id > ?" in sql
     assert params == [1, 10]
@@ -234,7 +234,7 @@ async def test_build_after_anchor():
 async def test_build_after_last():
     """Query with after_last."""
     builder = MockBuildQuery(last=99)
-    query = TapeQuery(tape="test", store=None).last_anchor()
+    query = TapeQuery(tape="test").last_anchor()
     sql, params = await builder.build(query)
     assert "entry_id > ?" in sql
     assert params == [1, 99]
@@ -244,7 +244,7 @@ async def test_build_after_last():
 async def test_build_between_anchors():
     """Query with between_anchors."""
     builder = MockBuildQuery(anchors_map={"start": 10, "end": 20})
-    query = TapeQuery(tape="test", store=None).between_anchors("start", "end")
+    query = TapeQuery(tape="test").between_anchors("start", "end")
     sql, params = await builder.build(query)
     assert "entry_id > ? AND entry_id < ?" in sql
     assert params == [1, 10, 20]
@@ -254,7 +254,7 @@ async def test_build_between_anchors():
 async def test_build_between_dates():
     """Query with between_dates."""
     builder = MockBuildQuery()
-    query = TapeQuery(tape="test", store=None).between_dates("2024-01-01", "2024-12-31")
+    query = TapeQuery(tape="test").between_dates("2024-01-01", "2024-12-31")
     sql, params = await builder.build(query)
     assert "date BETWEEN ? AND ?" in sql
     assert params == [1, "2024-01-01", "2024-12-31"]
@@ -264,7 +264,7 @@ async def test_build_between_dates():
 async def test_build_text_query():
     """Query with text search."""
     builder = MockBuildQuery()
-    query = TapeQuery(tape="test", store=None).query("hello")
+    query = TapeQuery(tape="test").query("hello")
     sql, params = await builder.build(query)
     assert "payload LIKE ?" in sql
     assert params == [1, "%hello%"]
@@ -275,7 +275,7 @@ async def test_build_combined():
     """Query with multiple filters combined."""
     builder = MockBuildQuery(anchors_map={"start": 10})
     query = (
-        TapeQuery(tape="test", store=None)
+        TapeQuery(tape="test")
         .kinds("message")
         .after_anchor("start")
         .between_dates("2024-01-01", "2024-12-31")
@@ -298,7 +298,7 @@ async def test_build_combined():
 async def test_build_after_anchor_not_found():
     """Missing anchor raises RepublicError."""
     builder = MockBuildQuery(anchors_map={})
-    query = TapeQuery(tape="test", store=None).after_anchor("missing")
+    query = TapeQuery(tape="test").after_anchor("missing")
     with pytest.raises(RepublicError) as exc_info:
         await builder.build(query)
     assert exc_info.value.kind == ErrorKind.NOT_FOUND
@@ -309,7 +309,7 @@ async def test_build_after_anchor_not_found():
 async def test_build_after_last_no_anchors():
     """No anchors raises RepublicError."""
     builder = MockBuildQuery(last=None)
-    query = TapeQuery(tape="test", store=None).last_anchor()
+    query = TapeQuery(tape="test").last_anchor()
     with pytest.raises(RepublicError) as exc_info:
         await builder.build(query)
     assert exc_info.value.kind == ErrorKind.NOT_FOUND
@@ -320,7 +320,7 @@ async def test_build_after_last_no_anchors():
 async def test_build_between_anchors_start_missing():
     """Missing start anchor raises RepublicError."""
     builder = MockBuildQuery(anchors_map={"start": None, "end": 20})
-    query = TapeQuery(tape="test", store=None).between_anchors("start", "end")
+    query = TapeQuery(tape="test").between_anchors("start", "end")
     with pytest.raises(RepublicError) as exc_info:
         await builder.build(query)
     assert exc_info.value.kind == ErrorKind.NOT_FOUND
@@ -331,7 +331,7 @@ async def test_build_between_anchors_start_missing():
 async def test_build_between_anchors_end_missing():
     """Missing end anchor raises RepublicError."""
     builder = MockBuildQuery(anchors_map={"start": 10, "end": None})
-    query = TapeQuery(tape="test", store=None).between_anchors("start", "end")
+    query = TapeQuery(tape="test").between_anchors("start", "end")
     with pytest.raises(RepublicError) as exc_info:
         await builder.build(query)
     assert exc_info.value.kind == ErrorKind.NOT_FOUND
@@ -342,7 +342,7 @@ async def test_build_between_anchors_end_missing():
 async def test_build_between_anchors_both_missing():
     """Both anchors missing raises RepublicError."""
     builder = MockBuildQuery(anchors_map={"start": None, "end": None})
-    query = TapeQuery(tape="test", store=None).between_anchors("start", "end")
+    query = TapeQuery(tape="test").between_anchors("start", "end")
     with pytest.raises(RepublicError) as exc_info:
         await builder.build(query)
     assert exc_info.value.kind == ErrorKind.NOT_FOUND
