@@ -1,7 +1,8 @@
+from ast import arg
 import uuid
 
 from pathlib import Path
-from typing import Any, TypedDict, Unpack, cast, override
+from typing import Any, TypedDict, Unpack, cast, overload, override
 from collections.abc import AsyncIterator, Callable, Generator
 from dataclasses import dataclass
 
@@ -43,40 +44,46 @@ class BubExt(Ext):
     @override
     def synthesizers(self) -> list[dict[str, Synthesizer] | Synthesizer] | None:
         return [
-            { "bub": BubOps(self.store) },
+            { "bub": BubOps(self.framework) },
             LLMOps()
         ]
 
 
 class BubOps(Synthesizer):
-    store: SQLiteForkTapeStore
+    framework: BubFramework
     
-    def __init__(self, store: SQLiteForkTapeStore) -> None:
-        self.store = store
-        self.mgr = AsyncTapeManager(store=store)
+    def __init__(self, framework: BubFramework) -> None:
+        self.framework = framework
 
     def _current_tape(self, args: list[Val], session: REPLSessionProto | None) -> Val:
         if session is None:
             raise Exception("current_tape must be called with a valid session")
         return VPrim(get_tape_name(session.state["bub_state"]))
 
-    async def _fork_tape(self, args: list[Val]) -> Val:
+    def _fork_tape(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
         tape_name, fork_name = _prim_val(args[0]), _maybe_val(_str_val, args[1])
         fork_name = fork_name or f"{tape_name}/fork_{uuid.uuid4().hex[:8]}"
-        await self.store.fork_tape(tape_name, fork_name)
-        return VPrim(fork_name)
+        async def _go():
+            await agent.tapes.fork_tape(tape_name, fork_name)
+            return VPrim(fork_name)
+        return VAsync(_go())
 
-    async def _make_tape(self, args: list[Val]) -> Val:
+    def _make_tape(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
         parent_tape, name = _maybe_val(_prim_val, args[0]), _str_val(args[1])
         suffix = uuid.uuid4().hex[:8]
         if parent_tape is not None:
             tape_name = f"{parent_tape}/{name}-{suffix}"
         else:
             tape_name = f"{name}-{suffix}"
-        await self.store.create(tape_name)
-        return VPrim(tape_name)
+        async def _go():
+            await agent.tapes.create(tape_name)
+            return VPrim(tape_name)
+        return VAsync(_go())
 
-    async def _tape_append(self, args: list[Val]) -> Val:
+    def _tape_append(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
         tape_name = _prim_val(args[0])
         role_tag = _role_val(args[1])
         content = _str_val(args[2])
@@ -84,14 +91,20 @@ class BubOps(Synthesizer):
         if role_tag == "assistant":
             message["reasoning_content"] = ""
         entry = TapeEntry.message(message)
-        await self.store.append(tape_name, entry)
-        return bi.UNIT_VAL
+        async def _go():
+            await agent.tapes.append_entry(tape_name, entry)
+            return bi.UNIT_VAL
+        return VAsync(_go())
 
-    async def _tape_handoff(self, args: list[Val]) -> Val:
+    def _tape_handoff(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
         tape_name = _prim_val(args[0])
         name = _str_val(args[1])
-        await self.mgr.handoff(tape_name, name)
-        return bi.UNIT_VAL
+        async def _go():
+            # TODO: add the summary parameter
+            await agent.tapes.handoff(tape_name, name=name)
+            return bi.UNIT_VAL
+        return VAsync(_go())
 
     # TODO: we should refine session to TyLookup, cause get_primop is called on loading,
     # the session might be different from that of evaluting the op. so we need to restrcit
@@ -104,13 +117,13 @@ class BubOps(Synthesizer):
             case "current_tape":
                 return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._current_tape))
             case "fork_tape":
-                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(self._fork_tape(vals)))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._fork_tape))
             case "make_tape":
-                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(self._make_tape(vals)))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._make_tape))
             case "tape_append":
-                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(self._tape_append(vals)))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_append))
             case "tape_handoff":
-                return VPartial.create(name.surface, len(arg_tys), lambda vals: VAsync(self._tape_handoff(vals)))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_handoff))
             case _:
                 return None
 
@@ -203,9 +216,14 @@ def split_fun(ty: Ty) -> tuple[list[Ty], Ty]:
     tys = list(_go(ty))
     return tys[:-1], tys[-1]
 
+@overload
+def _get_agent(state: REPLSessionProto | None) -> Agent: ...
+@overload
+def _get_agent(state: dict[str, Any]) -> Agent: ...
 
-def _get_agent(state: dict[str, Any]) -> Agent:
-    if "_runtime_agent" not in state:
+def _get_agent(state: dict[str, Any] | REPLSessionProto | None) -> Agent:
+    state = state.state if isinstance(state, REPLSessionProto) else state
+    if state is None or "_runtime_agent" not in state:
         raise RuntimeError("no runtime agent found in tool context")
     return cast(Agent, state["_runtime_agent"])
 
@@ -244,20 +262,27 @@ def _build_func_prompt(name: Name, doc: str | None, args: list[tuple[str, Ty, st
             return f"""<arg name="{name}" type="{arg_ty}" />"""
 
     def _lines() -> Generator[str, None, None]:
-        yield "<rules>Strictly follow the instructions funcall doc to complete the funcall</rules>"
-        yield f"""<funcall mod="{name.mod}" source="{name.loc}" name="{name.surface}">"""
+        yield "<rules>Strictly follow the instructions in repl:task.instruction to complete the funcall</rules>"
+        # NOTE: we included these attributes previously, but then LLM tries to call itself recursively
+        # mod="{name.mod}" source="{name.loc}" name="{name.surface}"
+        yield f"""<repl:task name="{name}">"""
         if doc:
-            yield f"<doc>{doc}</doc>"
+            yield f"<instruction>{doc}</instruction>"
         if args:
             yield "<args>"
             for arg_name, arg_ty, arg_doc in args:
                 yield _build_arg(arg_name, arg_ty, arg_doc)
             yield "</args>"
+        res_instr = """<instruction>call sf.repl "set_return <expr> to conclude the task"</instruction>"""
         if res_doc:
             yield f"""<return type="{res_ty}"><doc>{res_doc}</doc></return>"""
+            yield res_instr
         elif not _is_unit(res_ty):
             yield f"""<return type="{res_ty}" />"""
-        yield "</funcall>"
+            yield res_instr
+        elif _is_reply(res_ty):
+            yield """<instruction>output the final response to conclude the task</instruction>"""
+        yield "</repl:task>"
     return "\n".join(list(_lines()))
 
 

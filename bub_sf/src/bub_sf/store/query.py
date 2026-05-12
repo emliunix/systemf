@@ -136,7 +136,8 @@ class BuildQuery(ABC):
         
         tape_id = await self.tape_id(query.tape)
         if tape_id is None:
-            raise RepublicError(ErrorKind.NOT_FOUND, f"Tape '{query.tape}' was not found.")
+            tape_id = -1  # dummy id to prevent accidental matches in other queries
+            # raise RepublicError(ErrorKind.NOT_FOUND, f"Tape '{query.tape}' was not found.")
         # tape condition
         conditions.append(Cond("leaf_tape_id = ?", [tape_id]))
         

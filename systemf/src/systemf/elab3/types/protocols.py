@@ -34,6 +34,7 @@ class REPLContext(Protocol):
     def next_replmod_id(self) -> int: ...
 
 
+@runtime_checkable
 class REPLSessionProto(TyLookup, Protocol):
     """
     For use in Synthesizer

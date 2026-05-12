@@ -15,3 +15,16 @@ main :: String -> LLM () = \input ->
     let intent = user_intent input 
     in
         checked_run (current_tape ()) intent input
+
+{-# LLM notools #-}
+-- | summarize with context
+prim_op summarize :: Tape -> String -- ^ the instruction for the summarization
+    -> Reply -- ^ no need to call set_return
+
+compact :: Maybe String -> () = \msg ->
+    let tape = current_tape ()
+        instr = "summarize all the discussions so far\n" ++ (fromMaybe "" msg)
+        summary = un_reply (summarize tape instr)
+    in
+        -- hand crafted id monad to sequence the ops
+        (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "compaction")
