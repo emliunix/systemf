@@ -123,6 +123,8 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
      - sf-check doesn't include bub.sf to search paths by default.
      - the problem is BubExt requires TapeStore and BubFrameworkd for actually calling, though for check purpose it's not needed.
      - I'm not sure, maybe we can make search path a static field of Ext.
+24. **Steering message** `#feature`
+     - Add ability to inject steering messages into the conversation context to guide agent behavior dynamically
 
 ## Entry Points
 
