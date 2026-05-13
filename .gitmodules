@@ -3,4 +3,4 @@
 	url = https://github.com/emliunix/bub.git
 [submodule "republic"]
 	path = republic
-	url = https://github.com/bubbuild/republic
+	url = https://github.com/emliunix/republic.git
