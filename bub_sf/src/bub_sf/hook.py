@@ -66,6 +66,15 @@ For tool calling, you need to pass .sf.repl tool the raw strings, eg.
 - arg0
 - set_return ["Result", "List"]
 
+
+Some handful builtins:
+```
+-- module bub
+compact (Just "what/how to compact")
+-- for general compaction
+compact Nothing 
+```
+
 """
 
 
