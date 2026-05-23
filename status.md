@@ -62,7 +62,7 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
    - **Exploration:** [`analysis/AGENT_SPLIT_EXPLORATION.md`](analysis/AGENT_SPLIT_EXPLORATION.md) — proposes `CommandProcessor` + `AgentLoop` + `TurnDispatcher` split.
    - **Refined proposal:** [`analysis/COMMAND_FUNCTIONS_EXTRACTION.md`](analysis/COMMAND_FUNCTIONS_EXTRACTION.md) — two probed functions `run_command` and `run_command_stream` returning `| None`, no class needed.
 
-## Todo
+## Todo (Do check RULE)
 
 **RULE:** Todo sequence numbers are permanent. When an item is completed, move it to the Completed section but keep its original number. Do not renumber remaining items.
 
@@ -125,6 +125,15 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
      - I'm not sure, maybe we can make search path a static field of Ext.
 24. **Steering message** `#feature`
      - Add ability to inject steering messages into the conversation context to guide agent behavior dynamically
+25. **Document `fork_store.py` query behavior** `#documentation`
+     - Document when query operations error vs silently return empty:
+       - `TapeQuery` with non-existent tape: silently returns empty results (tape_id = -1), does NOT error
+       - `after_anchor` / `after_last` / `between_anchors`: error when anchors not found
+       - `fork` with non-existent source tape or existing target: errors
+       - `rename` / `reset` on non-existent tape: errors
+       - `fork_tape` with no entries or tool_call without assistant entry: errors
+     - Document auto-creation behavior: `append` auto-creates tape via `_get_or_create_tape`, `create` is `INSERT OR IGNORE` (no-op if exists), but `fork`/`rename`/`reset` require explicit creation
+     - Add docstrings to `SQLiteForkTapeStore`, `CoreOps`, and `BuildQueryImpl` public methods
 
 ## Entry Points
 
