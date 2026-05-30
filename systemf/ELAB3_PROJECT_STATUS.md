@@ -44,6 +44,10 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 
 ## Next Steps
 
+RULE: New sequence number is generated following the maximum existing sequence number.
+RULE: When moving item to Completed, the sequence number should be preserved.
+RATIONALE: The sequence number is used for cross reference, so should not change after assigned.
+
 1. **Bub primitives for tape**: Add tape operations (append, read, query) as SystemF primitives so SF code can interact with bub's tape-based context model.
 2. **More Built-in Types**: `Array`, `Map`, `IO`
 3. **Error Handling**: Better typechecker/evaluator error messages
@@ -60,6 +64,8 @@ Elab3 is a module system elaborator for SystemF with bidirectional type inferenc
 14. **Preserve type applications for primops** `#feature`: Currently `CoreTyApp` discards type arguments during evaluation (eval.py:201-202). Polymorphic primops like `ask :: forall a. Tape -> String -> a` cannot know the instantiated type `a`. Extend the evaluator to accumulate type applications in `VPartial` or pass them to the primop finish callback, enabling type-aware primitive operations. Needed for LLM primitives that must parse/typecheck their result based on the requested type.
 15. **Add infix operation ";" for sequential execution** `#feature`: Introduce `;` as an infix operator to denote sequential execution (e.g., `expr1; expr2`), allowing side-effecting operations to be chained in a natural order.
 16. **arg and set_return should not be passed across fork** `#bug`: The `arg` and `set_return` REPL items are currently being passed across fork boundaries, but they should only live in the current REPL session.
+17. **REPL: `:browse` should list REPL defined names without args**: `#feature`
+18. **Prompt type** we can eliminate the need for `{-# PROMPT #-}` in #10 by simply using a wrapper type `Prompt a`.
 
 
 ## Entry Points

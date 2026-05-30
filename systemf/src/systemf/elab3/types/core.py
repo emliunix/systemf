@@ -43,17 +43,6 @@ class CoreVar(CoreTm):
 
 
 @dataclass(repr=False)
-class CoreGlobalVar(CoreTm):
-    """Top-level / module-level variable reference.
-
-    Unlike CoreVar (local), a global var is defined at module scope and
-    resolved via the module's type/value environment. Not substituted by
-    local let/lambda binders.
-    """
-    id: Id
-
-
-@dataclass(repr=False)
 class CoreLam(CoreTm):
     """Lambda abstraction."""
     param: Id

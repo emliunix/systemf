@@ -6,7 +6,6 @@ Indent-aware, uses core-specific syntax (not surface syntax).
 from .core import (
     CoreApp,
     CoreCase,
-    CoreGlobalVar,
     CoreLam,
     CoreLet,
     CoreLit,
@@ -50,7 +49,7 @@ def _pp(tm: CoreTm, depth: int, width: int) -> list[str]:
         case CoreLit(value):
             return [f"{ind}{value!r}"]
 
-        case CoreVar(id) | CoreGlobalVar(id):
+        case CoreVar(id):
             return [f"{ind}{id.name.surface}"]
 
         case CoreLam(param, body):
@@ -110,7 +109,7 @@ def _pp_fun(tm: CoreTm, depth: int, width: int) -> list[str]:
     Parenthesize if it's not a simple head (var, global, app, tyapp).
     """
     match tm:
-        case CoreVar() | CoreGlobalVar() | CoreApp() | CoreTyApp():
+        case CoreVar() | CoreApp() | CoreTyApp():
             return _pp(tm, depth, width)
         case _:
             return _pp_paren(tm, depth, width)
@@ -119,7 +118,7 @@ def _pp_fun(tm: CoreTm, depth: int, width: int) -> list[str]:
 def _pp_arg(tm: CoreTm, depth: int, width: int) -> list[str]:
     """Print an argument position — parenthesize if not atomic."""
     match tm:
-        case CoreVar() | CoreGlobalVar() | CoreLit():
+        case CoreVar() | CoreLit():
             return _pp(tm, depth, width)
         case _:
             return _pp_paren(tm, depth, width)
@@ -167,7 +166,7 @@ def _pp_alt(alt) -> str:
 def scrut_id(tm: CoreTm) -> str:
     """Extract scrutinee identifier string."""
     match tm:
-        case CoreVar(id) | CoreGlobalVar(id):
+        case CoreVar(id):
             return id.name.surface
         case _:
             return "..."

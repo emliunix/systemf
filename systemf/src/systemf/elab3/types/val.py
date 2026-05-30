@@ -54,6 +54,12 @@ class Trap(Val):
         self.v = v
 
 
+@dataclass(repr=False)
+class CoreValUnsafe(CoreTm):
+    """Special value wrapper for passing Val to unsafe_eval."""
+    val: Val
+
+
 @runtime_checkable
 class HasDoc(Protocol):
     """Protocol for values that has doc attached."""

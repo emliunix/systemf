@@ -1,11 +1,12 @@
 
+import functools
 from typing import Any, Callable, Protocol, cast, overload, override
 
-from pyrsistent import pmap
+from pyrsistent import PMap, pmap
 
 from systemf.elab3.core_extra import CoreBuilderExtra
 from systemf.elab3.types.ast import ImportDecl
-from systemf.elab3.types.core import CoreTm
+from systemf.elab3.types.core import C, CoreTm, CoreVar
 from systemf.elab3.types.protocols import NameGenerator, REPLSessionProto, Synthesizer
 from systemf.surface.parser import parse_expression, parse_program, ParseError
 from systemf.surface.types import SurfaceTermDeclaration
@@ -19,7 +20,7 @@ from .eval import Evaluator, EvalCtx
 from .types import Module, TyThing, REPLContext, Name
 from .types.ty import Id, Ty, TyConApp, TyFun
 from .types.tything import ACon, AnId, tything_name
-from .types.val import VData, Val
+from .types.val import CoreValUnsafe, VData, Val
 from .types.vpartial import VPartial
 
 
@@ -150,8 +151,8 @@ class REPLSession(EvalCtx, REPLSessionProto):
         return None
 
     @override
-    async def unsafe_eval(self, input: CoreTm) -> Val:
-        return await self._evaluator._eval_expr(input, pmap())
+    async def unsafe_eval(self, input: CoreTm, envs: PMap[int, Val] | None = None) -> Val:
+        return await self._evaluator._eval_expr(input, envs or pmap())
 
     # --- EvalCtx implementation ---------------------------------------------
 
@@ -300,3 +301,12 @@ def _mk_data(tag: int) -> Callable[[list[Val]], Val]:
     def _con(args: list[Val]) -> Val:
         return VData(tag, args)
     return _con
+
+
+def fun_call_tm(fun: Id, args: list[Val]) -> CoreTm:
+    tm: CoreTm = C.var(fun)
+    return functools.reduce(
+        lambda acc, arg: C.app(acc, CoreValUnsafe(arg)),
+        reversed(args),
+        tm
+    )

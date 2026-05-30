@@ -16,7 +16,7 @@ from pyrsistent import pmap
 
 from systemf.elab3.core_extra import CoreBuilderExtra
 from systemf.elab3.types.core import (
-    C, CoreTm, CoreLit, CoreVar, CoreGlobalVar, CoreLam, CoreApp,
+    C, CoreTm, CoreLit, CoreVar, CoreLam, CoreApp,
     CoreTyLam, CoreTyApp, CoreLet, CoreCase,
     NonRec, Rec,
     DataAlt, LitAlt, DefaultAlt, Alt,
@@ -24,7 +24,7 @@ from systemf.elab3.types.core import (
 from systemf.elab3.types.protocols import REPLSessionProto
 from .types.ty import Id, Name
 from .types.mod import Module
-from .types.val import VAsync, Val, VLit, VClosure, VData, Trap, Env
+from .types.val import CoreValUnsafe, VAsync, Val, VLit, VClosure, VData, Trap, Env
 from .types.vpartial import SessionAwareFinish, VPartial
 
 
@@ -186,9 +186,6 @@ class Evaluator:
                 else:
                     return await self.call_continue(await self.ctx.lookup_gbl(id.name), k)
 
-            case CoreGlobalVar(id=id):
-                return await self.step(CoreVar(id), env, k)
-
             case CoreLam(param=param, body=body):
                 return await self.call_continue(VClosure(env, param, body), k)
 
@@ -225,6 +222,9 @@ class Evaluator:
 
             case CoreCase(scrut=scrut, var=var, alts=alts):
                 return (scrut, env, Kases(alts, var, env, k))
+
+            case CoreValUnsafe(val=v):
+                return await self.call_continue(v, k)
 
             case _:
                 raise Exception(f"step: unhandled term: {t!r}")

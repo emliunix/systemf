@@ -1,6 +1,8 @@
 from collections.abc import Iterable
 from typing import Any, Callable, Protocol, runtime_checkable
 
+from pyrsistent import PMap
+
 from systemf.utils.location import Location
 
 from .ast import ImportDecl
@@ -50,7 +52,7 @@ class REPLSessionProto(TyLookup, Protocol):
     # 1. it's expr only, so no new def/bindings added
     # 2. we don't have a valid/easy way to input surface ast programmatically
     # 3. the use case is mainly for value passing like big chunk of LitString
-    async def unsafe_eval(self, input: CoreTm) -> Val:
+    async def unsafe_eval(self, input: CoreTm, envs: PMap[int, Val] | None = None) -> Val:
         """The untyped variant of eval"""
         ...
 
