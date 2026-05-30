@@ -1,4 +1,5 @@
 from ast import arg
+import asyncio
 import uuid
 
 from pathlib import Path
@@ -10,7 +11,8 @@ from loguru import logger
 from bub.builtin.agent import Agent
 from bub.builtin.tape import get_tape_name
 from bub.framework import BubFramework
-from republic.core.results import AsyncStreamEvents, FinalEvent, Finished, StreamEvent, ToolCallNeeded, TurnResult
+from bub_sf.sf_helpers import MatchLLMResult, match_tycon_app, maybe_val, prim_val, split_fun, str_val
+from republic.core.results import AsyncStreamEvents, FinalEvent, Finished, Prompt, StreamEvent, ToolCallNeeded, TurnResult
 
 from bub_sf.store.fork_store import SQLiteForkTapeStore
 from republic.tape.entries import TapeEntry
@@ -62,7 +64,7 @@ class BubOps(Synthesizer):
 
     def _tape_fork(self, args: list[Val], session: REPLSessionProto | None) -> Val:
         agent = _get_agent(session)
-        tape_name, fork_name = _prim_val(args[0]), _maybe_val(_str_val, args[1])
+        tape_name, fork_name = prim_val(args[0]), maybe_val(str_val, args[1])
         fork_name = fork_name or f"{tape_name}/fork"
         fork_name = f"{fork_name}_{uuid.uuid4().hex[:8]}"
         async def _go():
@@ -72,7 +74,7 @@ class BubOps(Synthesizer):
 
     def _tape_make(self, args: list[Val], session: REPLSessionProto | None) -> Val:
         agent = _get_agent(session)
-        parent_tape, name = _maybe_val(_prim_val, args[0]), _str_val(args[1])
+        parent_tape, name = maybe_val(prim_val, args[0]), maybe_val(str_val, args[1])
         suffix = uuid.uuid4().hex[:8]
         if parent_tape is not None:
             tape_name = f"{parent_tape}/{name}-{suffix}"
@@ -85,9 +87,9 @@ class BubOps(Synthesizer):
 
     def _tape_append(self, args: list[Val], session: REPLSessionProto | None) -> Val:
         agent = _get_agent(session)
-        tape_name = _prim_val(args[0])
-        role_tag = _role_val(args[1])
-        content = _str_val(args[2])
+        tape_name = prim_val(args[0])
+        role_tag = prim_val(args[1])
+        content = str_val(args[2])
         message = {"role": role_tag, "content": content}
         if role_tag == "assistant":
             message["reasoning_content"] = ""
@@ -99,8 +101,8 @@ class BubOps(Synthesizer):
 
     def _tape_handoff(self, args: list[Val], session: REPLSessionProto | None) -> Val:
         agent = _get_agent(session)
-        tape_name = _prim_val(args[0])
-        name = f"{_str_val(args[1])}_{uuid.uuid4().hex[:8]}"
+        tape_name = prim_val(args[0])
+        name = f"{maybe_val(str_val, args[1])}_{uuid.uuid4().hex[:8]}"
         async def _go():
             # TODO: add the summary parameter
             await agent.tapes.handoff(tape_name, name=name)
@@ -140,11 +142,12 @@ class LLMOps(Synthesizer):
         agent_kwargs = {}
         for opt in llm_opts:
             match opt:
+                # NOTE: notools specifically means no other tools, sf.repl is fundamental
                 case "notools": agent_kwargs["allowed_tools"] = ["sf.repl"]
                 case "noskills": agent_kwargs["allowed_skills"] = []
                 case _: pass
 
-        match_res = _match_llm_funty(thing.id.ty, session)
+        match_res = MatchLLMResult.from_ty(thing.id.ty)
 
         async def _fun(args: list[Val], session: REPLSessionProto | None) -> Val:
             logger.info(f"LLM function call: {name.mod}.{name.surface}")
@@ -154,6 +157,7 @@ class LLMOps(Synthesizer):
             # NOTE: temp/ prefix suppress merge_back
             # NOTE: tape is either temp or explicitly speicfied in args
             tape_name = _tape_name(match_res, args) or f"{session_id}/temp-{uuid.uuid4().hex[:8]}"
+            steering = _steering(match_res, args)
 
             doc = thing.metas.doc if thing.metas else None
 
@@ -180,7 +184,7 @@ class LLMOps(Synthesizer):
             # ensure full copy to avoid mutation backpropagation
             s2.state["bub_state"] = {
                 **session.state["bub_state"],
-                "sf_session": s2,
+                "sf_repl": s2,
                 "tape_name": tape_name,
             }
 
@@ -189,13 +193,13 @@ class LLMOps(Synthesizer):
             res: list[Val | None] = [None]
             s2.add_return(res, res_ty)
 
-            # if res_ty is LLM
             llm_call_args = (
-                s2, tape_name,
+                s2, tape_name, steering,
                 name, doc,
                 arg_vals, arg_tys, arg_docs,
                 res, res_ty, res_doc
             )
+            # if res_ty is LLM
             if match_res.is_llm_res:
                 return await _stream_llm_call(*llm_call_args, **agent_kwargs)
             else:
@@ -204,21 +208,9 @@ class LLMOps(Synthesizer):
         return VPartial.create(name.surface, match_res.orig_arg_num, SessionAwareFinish.from_async(_fun))
 
 
-def split_fun(ty: Ty) -> tuple[list[Ty], Ty]:
-    def _go(ty: Ty) -> Generator[Ty, None, None]:
-        match ty:
-            case TyFun(arg, res):
-                yield arg
-                yield from _go(res)
-            case TyForall(_, body):
-                yield from _go(body)
-            case _:
-                yield ty
-    tys = list(_go(ty))
-    return tys[:-1], tys[-1]
-
 @overload
 def _get_agent(state: REPLSessionProto | None) -> Agent: ...
+
 @overload
 def _get_agent(state: dict[str, Any]) -> Agent: ...
 
@@ -229,38 +221,52 @@ def _get_agent(state: dict[str, Any] | REPLSessionProto | None) -> Agent:
     return cast(Agent, state["_runtime_agent"])
 
 
-async def run_agent_with_repl(repl: REPLSessionProto, tape_name: str, prompt: str, **kwargs: Unpack[LLMCallConfig]) -> str:
+async def run_agent_with_repl(repl: REPLSessionProto, tape_name: str, prompt: str, steering: asyncio.Queue[Prompt] | None, **kwargs: Unpack[LLMCallConfig]) -> str:
     """Run a task with sub-agent using specific model and session."""
     state = repl.state["bub_state"]
-
     agent = _get_agent(state)
     output = await agent.run(
         tape_name=tape_name,
         prompt=prompt,
+        steering=steering,
         state=state,
         **kwargs
     )
     return output
 
 
-async def run_agent_with_repl_and_stream(repl: REPLSessionProto, tape_name: str, prompt: str, **kwargs: Unpack[LLMCallConfig]) -> AsyncStreamEvents:
+async def run_agent_with_repl_and_stream(repl: REPLSessionProto, tape_name: str, prompt: str, steering: asyncio.Queue[Prompt] | None, **kwargs: Unpack[LLMCallConfig]) -> AsyncStreamEvents:
     """Run a task with sub-agent using specific model and session, and stream the output."""
     state = repl.state["bub_state"]
     agent = _get_agent(state)
     return await agent.run_stream(
         tape_name=tape_name,
         prompt=prompt,
+        steering=steering,
         state=state,
         **kwargs
     )
 
 
-def _build_func_prompt(name: Name, doc: str | None, args: list[tuple[str, Ty, str | None]], res_ty: Ty, res_doc: str | None) -> str:
-    def _build_arg(name: str, arg_ty: Ty, doc: str | None) -> str:
+def _build_func_prompt(session: REPLSessionProto, name: Name, doc: str | None, args: list[tuple[str, Val, Ty, str | None]], res_ty: Ty, res_doc: str | None) -> str:
+    def _build_arg(name: str, arg_val: Val,arg_ty: Ty, doc: str | None) -> Generator[str, None, None]:
+        match match_tycon_app(arg_ty, "bub", "Prompt"):
+            case [inner_ty]:
+                yield from _build_arg_prompt(name, cast(VData, arg_val).vals[0], inner_ty, doc)
+            case _:
+                yield from _build_arg_plain(name, arg_ty, doc)
+    def _build_arg_plain(name: str, arg_ty: Ty, doc: str | None) -> Generator[str, None, None]:
         if doc:
-            return f"""<arg name="{name}" type="{arg_ty}"><doc>{doc}</doc></arg>"""
+            yield f"""<arg name="{name}" type="{arg_ty}"><doc>{doc}</doc></arg>"""
         else:
-            return f"""<arg name="{name}" type="{arg_ty}" />"""
+            yield f"""<arg name="{name}" type="{arg_ty}" />"""
+    def _build_arg_prompt(name: str, arg_val: Val, arg_ty: Ty, doc: str | None) -> Generator[str, None, None]:
+        if doc:
+            yield f"""<arg name="{name}" type="{arg_ty}"><doc>{doc}</doc>"""
+            yield pp_val(session, arg_val, arg_ty)
+            yield """</arg>"""
+        else:
+            yield f"""<arg name="{name}" type="{arg_ty}" />"""
 
     def _lines() -> Generator[str, None, None]:
         yield "<rules>Strictly follow the instructions in repl:task.instruction to complete the funcall</rules>"
@@ -271,8 +277,8 @@ def _build_func_prompt(name: Name, doc: str | None, args: list[tuple[str, Ty, st
             yield f"<instruction>{doc}</instruction>"
         if args:
             yield "<args>"
-            for arg_name, arg_ty, arg_doc in args:
-                yield _build_arg(arg_name, arg_ty, arg_doc)
+            for arg_name, arg_val, arg_ty, arg_doc in args:
+                yield from _build_arg(arg_name, arg_val, arg_ty, arg_doc)
             yield "</args>"
         
         if not _is_unit(res_ty):
@@ -283,7 +289,7 @@ def _build_func_prompt(name: Name, doc: str | None, args: list[tuple[str, Ty, st
             if _is_reply(res_ty):
                 yield """<instruction>directly provide the final result to conclude the task (no set_return call needed)</instruction>"""
             else:
-                yield """<instruction>call sf.repl "set_return <expr>" to return the result and conclude the task</instruction>"""
+                yield """<instruction>call sf.repl "set_return <expr>" (expected output: "MkUnit :: Unit") to set the result value to conclude the task</instruction>"""
         yield "</repl:task>"
     return "\n".join(list(_lines()))
 
@@ -304,59 +310,6 @@ def _pp_nonfunc_val(session: REPLSessionProto, name: str, val: Val, ty: Ty, doc:
                 return f"{name} :: {ty} = {pp_val(session, val, ty)}"
 
 
-def _match_llm_ty(ty: Ty, session: REPLSessionProto) -> Ty | None:
-    # matches types of the form `LLM a` for some `a`
-    match ty:
-        case TyConApp(name=name, args=[inner_ty]) if name.surface == "LLM":
-            return inner_ty
-        case _:
-            return None
-
-
-def _match_tape_ty(ty: Ty, session: REPLSessionProto) -> bool:
-    # matches types of the form `Tape` or `Tape a` for some `a`
-    match ty:
-        case TyConApp(name=name, args=[]) if name.surface == "Tape":
-            return True
-        case _:
-            return False
-
-
-@dataclass
-class MatchLLMResult:
-    orig_arg_num: int
-    tape_idx: int | None
-    arg_tys: list[Ty]
-    arg_idxs: list[int]
-    is_llm_res: bool
-    res_ty: Ty
-
-
-def _match_llm_funty(ty: Ty, session: REPLSessionProto) -> MatchLLMResult:
-    raw_arg_tys, raw_res_ty = split_fun(ty)
-    arg_tys = []
-    arg_idxs = []
-    is_llm_res = False
-    res_ty = raw_res_ty
-    tape_idx = None
-    for i, arg_ty in enumerate(raw_arg_tys):
-        if _match_tape_ty(arg_ty, session):
-            tape_idx = i
-        else:
-            arg_idxs.append(i)
-            arg_tys.append(arg_ty)
-    if (inner_res := _match_llm_ty(res_ty, session)) is not None:
-        is_llm_res = True
-        res_ty = inner_res
-    return MatchLLMResult(
-        orig_arg_num=len(raw_arg_tys),
-        tape_idx=tape_idx,
-        arg_tys=arg_tys,
-        arg_idxs=arg_idxs,
-        is_llm_res=is_llm_res,
-        res_ty=res_ty,
-    )
-
 
 def _tape_name(match_res: MatchLLMResult, args: list[Val]) -> str | None:
     if match_res.tape_idx is not None:
@@ -365,6 +318,11 @@ def _tape_name(match_res: MatchLLMResult, args: list[Val]) -> str | None:
                 return name
             case v:
                 raise Exception(f"Expected tape, got: {v}")
+            
+
+def _steering(match_res: MatchLLMResult, args: list[Val]) -> asyncio.Queue[Prompt] | None:
+    if match_res.steering_idx:
+        return prim_val(args[match_res.steering_idx])
 
 
 def _is_unit(ty: Ty) -> bool:
@@ -385,32 +343,6 @@ def _is_reply(ty: Ty) -> bool:
 
 def _mk_reply(text: str) -> Val:
     return VData(0, [VLit(LitString(text))])
-
-
-def _prim_val(val: Val) -> Any:
-    match val:
-        case VPrim(s):
-            return s
-        case v:
-            raise Exception(f"Expected primitive string value, got: {v}")
-        
-
-def _str_val(val: Val) -> str:
-    match val:
-        case VLit(LitString(s)):
-            return s
-        case v:
-            raise Exception(f"Expected literal string value, got: {v}")
-
-
-def _maybe_val(inside: Callable[[Val], Any], val: Val) -> Any | None:
-    match val:
-        case VData(0, []):
-            return None
-        case VData(1, [inner]):
-            return inside(inner)
-        case v:
-            raise Exception(f"Expected Maybe value, got: {v}")
 
 
 def _role_val(val: Val) -> str:
@@ -449,7 +381,7 @@ def wrap_stream_for_res(stream: AsyncStreamEvents[TurnResult], res: list[Val | N
     return AsyncStreamEvents(_wrapped())
 
 async def _stream_llm_call(
-    session: REPLSessionProto, tape_name: str,
+    session: REPLSessionProto, tape_name: str, steering: asyncio.Queue[Prompt] | None,
     name: Name, doc: str | None,
     arg_vals: list[Val], arg_tys: list[Ty], arg_docs: list[str | None],
     res: list[Val | None], res_ty: Ty, res_doc: str | None,
@@ -459,7 +391,7 @@ async def _stream_llm_call(
         _pp_nonfunc_val(session, f"arg{i}", v, ty, doc)
         for i, (v, ty, doc) in enumerate(zip(arg_vals, arg_tys, arg_docs))
     ])
-    stream = await run_agent_with_repl_and_stream(session, tape_name, prompt, **kwargs)
+    stream = await run_agent_with_repl_and_stream(session, tape_name, prompt, steering, **kwargs)
     stream = wrap_stream_for_res(stream, res)
     # NOTE: actually it's fine, this is `LLM a`
     # but we don't provide any function like `LLM a -> a`
@@ -467,19 +399,19 @@ async def _stream_llm_call(
 
 
 async def _direct_llm_call(
-    session: REPLSessionProto, tape_name: str,
+    session: REPLSessionProto, tape_name: str, steering: asyncio.Queue[Prompt] | None,
     name: Name, doc: str | None,
     arg_vals: list[Val], arg_tys: list[Ty], arg_docs: list[str | None],
     res: list[Val | None], res_ty: Ty, res_doc: str | None,
     **kwargs: Unpack[LLMCallConfig]
 ) -> Val:
     func_prompt = _build_func_prompt(
-        name, doc,
-        list((f"arg{i}", ty, doc) for i, (ty, doc) in enumerate(zip(arg_tys, arg_docs))),
+        session, name, doc,
+        list((f"arg{i}", val, ty, doc) for i, (val, ty, doc) in enumerate(zip(arg_vals, arg_tys, arg_docs))),
         res_ty, res_doc,
     )
     for i in range(3):  # retry up to 3 times
-        output = await run_agent_with_repl(session, tape_name, func_prompt, **kwargs)
+        output = await run_agent_with_repl(session, tape_name, func_prompt, steering, **kwargs)
         if res[0]:
             break
         if _is_reply(res_ty):

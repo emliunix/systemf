@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import uuid
+from collections.abc import AsyncIterator, Callable, Coroutine
 import asyncio
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from loguru import logger
 from bub.builtin.tape import get_tape_name
+from bub_sf.sf_helpers import MainInfo
 from republic import ToolContext
 
 from bub.builtin.agent import Agent
@@ -21,25 +22,21 @@ from bub.types import Envelope, State
 from bub_sf.store.fork_store import SQLiteForkTapeStore
 from bub_sf.bub_ext import BubExt
 from bub_sf.hook_cli import register_commands
-from republic.core.results import AsyncStreamEvents
+from republic.core.results import AsyncStreamEvents, LLMResult, StreamEvent
 from republic.tape.store import AsyncTapeStore
-from systemf.elab3.reader_env import QualName
 from systemf.elab3.repl import REPL
 from systemf.elab3.repl_driver import REPLDriver
-from systemf.elab3.repl_session import REPLSession
+from systemf.elab3.repl_session import REPLSession, fun_call_tm
 from systemf.elab3.types.ast import ImportDecl
-from systemf.elab3.types.core import C
 from systemf.elab3.types.protocols import Ext
-from systemf.elab3.types.ty import Id, LitString, TyFun
-from systemf.elab3.types.tything import AnId
-from systemf.elab3.types.val import VPrim
-from systemf.elab3.val_pp import pp_val
+from systemf.elab3.types.ty import LitString
+from systemf.elab3.types.val import VLit, VPrim, Val
 
 
 SYSTEM_PROMPT = """
 You have access to a live System F type-checker and evaluator.
 Use the `sf.repl` tool for repl commands or to evaluate System F expressions.
-The REPL session persists across turns (but not restarts) — definitions accumulate.
+Accumulate works by defining new types and values.
 
 Examples:
 >> "Hello"
@@ -70,6 +67,7 @@ For tool calling, you need to pass .sf.repl tool the raw strings, eg.
 Some handful builtins:
 ```
 -- module bub
+-- compact the tape (replacing tape_handoff with explicity summarization)
 compact (Just "what/how to compact")
 -- for general compaction
 compact Nothing 
@@ -88,24 +86,20 @@ compact Nothing
     context=True,
     description="""eval a systemf REPL expr or :command, (:help for more)""",
 )
-async def sf_repl(input1: str, *rest: str, context: ToolContext) -> str:
-    input_ctnt = " ".join((input1, *rest))
+async def sf_repl(expr: str, *rest: str, context: ToolContext) -> str:
+    input_ctnt = " ".join((expr, *rest))
     session_id = context.state.get("session_id", "unknown")
     logger.debug(f"sf.repl expr={input_ctnt!r} session_id={session_id}")
 
-    sf_hook: SFHookImpl | None = context.state.get("sf_ctx")
-    if sf_hook is None:
-        raise Exception("sf.repl requires sf_ctx in state")
-
     # session is either created for root or preset for nested calls
-    session: REPLSession | None = context.state.get("sf_session")
-    if session is None:
-        session = await sf_hook.get_or_create(session_id or "temp/unknown")
-    session.state["bub_state"] = context.state
+    repl: REPLSession | None = context.state.get("sf_repl")
+    if repl is None:
+        raise Exception("REPL session not found")
+    repl.state["bub_state"] = context.state
 
     try:
         res = []
-        await REPLDriver(session, lines=input_ctnt.splitlines(), output=lambda s: res.append(s)).run()
+        await REPLDriver(repl, lines=input_ctnt.splitlines(), output=lambda s: res.append(s)).run()
         logger.debug(f"sf.repl.success res={'\n'.join(res)!r} session_id={session_id}")
         return "\n".join(res)
     except Exception as exc:
@@ -121,13 +115,65 @@ async def sf_repl(input1: str, *rest: str, context: ToolContext) -> str:
 # ---------------------------------------------------------------------------
 
 
+class TaskBase:
+    lock: asyncio.Lock
+    active_task: asyncio.Task | None
+    active_task_token: object | None
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.active_task = None
+        self.active_task_token = None
+
+    async def ensure_task(self, task_fn: Callable[[], Coroutine[None, None, None]]) -> None:
+        async with self.lock:
+            task_token = object()
+            self.active_task_token = task_token
+            if self.active_task is None:
+                async def _go_init():
+                    try: 
+                        await task_fn()
+                    except Exception as exc:
+                        logger.exception("Error in task", exc_info=exc)
+                    finally:
+                        async with self.lock:
+                            if self.active_task_token is task_token:
+                                self.active_task = None
+                self.active_task = asyncio.create_task(_go_init())
+            else:
+                async def _go_after_task(task: asyncio.Task) -> None:
+                    # all previous task is guaranteed to have handled its exception
+                    await task
+                    try:
+                        await task_fn()
+                    except Exception as exc:
+                        logger.exception("Error in task", exc_info=exc)
+                    finally:
+                        async with self.lock:
+                            if self.active_task_token is task_token:
+                                self.active_task = None
+                self.active_task = asyncio.create_task(_go_after_task(self.active_task))
+
+
+class SessionInfo(TaskBase):
+    session_id: str
+    queue: asyncio.Queue[str]
+    repl: REPLSession
+
+    def __init__(self, session_id: str, repl: REPLSession) -> None:
+        super().__init__()
+        self.session_id = session_id
+        self.queue = asyncio.Queue()
+        self.repl = repl
+
+
 class SFHookImpl:
     """Wires a per-session REPLSession into framework state and exposes sf.repl."""
 
     framework: BubFramework
-    _repl: REPL
     fork_store: SQLiteForkTapeStore
-    # _notification_channel: NotificationChannel | None = None
+    _repl: REPL
+    _sessions: dict[str, SessionInfo]
 
     def __init__(self, framework: BubFramework) -> None:
         store = asyncio.run(self._get_fork_store())
@@ -138,29 +184,18 @@ class SFHookImpl:
             search_paths=[str(Path(__file__).parent.resolve())],
             exts=sf_exts
         )
-        self._sessions: dict[str, REPLSession] = {}
+        self._sessions: dict[str, SessionInfo] = {}
         self.fork_store = store
 
     async def _get_fork_store(self) -> SQLiteForkTapeStore:
         return  await SQLiteForkTapeStore.create_store(Path("./tape_store.db"))
 
-    async def get_or_create(self, session_id: str) -> REPLSession:
+    def get_or_create(self, session_id: str) -> SessionInfo:
         if session_id not in self._sessions:
-            session = self._repl.new_session()
-            _init_session(session)
-            self._sessions[session_id] = session
+            repl = self._repl.new_session()
+            _init_session(repl)
+            self._sessions[session_id] = SessionInfo(session_id, repl)
         return self._sessions[session_id]
-
-    @hookimpl
-    async def load_state(self, message: Envelope, session_id: str) -> State:
-        """Populate state with a persistent REPLSession for this conversation."""
-        state: State = {
-            "sf_ctx": self,
-            "sf_session": await self.get_or_create(session_id),
-        }
-        # if self._notification_channel is not None:
-        #     state["notification_channel"] = self._notification_channel
-        return state
 
     @hookimpl
     async def run_model_stream(self, prompt: str | list[dict], session_id: str, state: State) -> AsyncStreamEvents:
@@ -174,31 +209,55 @@ class SFHookImpl:
 
         if not isinstance(prompt, str):
             raise Exception("Only string prompt is supported for now")
+        
+        session = self.get_or_create(session_id)
+        state["sf_repl"] = session.repl
+        session.queue.put_nowait(prompt)
+        out_q = asyncio.Queue()
+        await session.ensure_task(lambda: self._run_agent_session(session, state, out_q))
+        # NOTE: Returning empty stream is transitional. The actual response goes
+        # via tools (e.g., send_message). This old design expected streaming
+        # events back through the hook return value. Should be cleaned up once
+        # tool-based messaging is fully adopted.
+        async def _out() -> AsyncIterator[StreamEvent[LLMResult]]:
+            try:
+                while True:
+                    event = await out_q.get()
+                    yield event
+            except asyncio.QueueShutDown:
+                return
+        return AsyncStreamEvents(_out())
 
-        repl = await self.get_or_create(session_id)
-        repl.state["bub_state"] = state
+    async def _run_agent_session(self, session: SessionInfo, state: State, out_q: asyncio.Queue[StreamEvent[LLMResult]]) -> None:
+        if session.queue.empty():
+            return
+        session.repl.state["bub_state"] = state
         # eval: main prompt
-        main = repl.lookup(repl.resolve_name(QualName("main", "main")))
-        if not isinstance(main, AnId):
-            raise Exception("main.main is not an Id")
-        res = await repl.unsafe_eval(C.app(C.var(main.id), C.lit(LitString(prompt))))
+        info = MainInfo.from_session(session.repl)
+        str_val = None
+        q_val = None
+        vals: list[tuple[int, Val]] = []
+        match info.str_ty:
+            case (i, _):
+                prompt = await session.queue.get()
+                vals.append((i, VLit(LitString(prompt))))
+        match info.prompt_ty:
+            case (i, _):
+                vals.append((i, VPrim(session.queue)))
+        vals_ = [val for _, val in sorted(vals)]
+        res = await session.repl.unsafe_eval(fun_call_tm(info.main.id, vals_))
         match res:
             case VPrim([AsyncStreamEvents() as events, _]):
-                return events
+                async for event in events:
+                    await out_q.put(event)
+                out_q.shutdown()
             case _:
                 raise Exception(f"Expected AsyncStreamEvents from main.main, got {res}")
 
     @hookimpl
-    def system_prompt(self, prompt: str | list[dict], state: State) -> str:
+    def system_prompt(self, state: State) -> str:
         """Tell the LLM it has a System F REPL available via sf.repl."""
         return SYSTEM_PROMPT
-
-    # @hookimpl
-    # def provide_channels(self, message_handler) -> list:
-    #     """Provide the notification channel for async events."""
-    #     from bub_sf.channels.notification import NotificationChannel
-    #     self._notification_channel = NotificationChannel(on_receive=message_handler)
-    #     return [self._notification_channel]
 
     @hookimpl
     def provide_tape_store(self) -> AsyncTapeStore:
@@ -219,6 +278,7 @@ class SFHookImpl:
 def _init_session(session: REPLSession) -> None:
     """Initialize a REPLSession with any necessary setup."""
     session.add_import(ImportDecl(module="main"))
+    session.add_import(ImportDecl(module="bub"))
 
 def _get_agent(state: dict[str, Any]) -> Agent:
     return state["_runtime_agent"]

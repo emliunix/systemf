@@ -1,4 +1,7 @@
 prim_type LLM a
+-- | the prompt passed to the LLM call
+-- and it supports steering
+prim_type Steering
 prim_type Tape
 
 -- | get the current tape
@@ -36,9 +39,14 @@ un_reply :: Reply -> String = \r -> case r of
   MkReply s -> s
 
 {-# LLM notools #-}
--- | summarize the conversation with the given instruction
+-- | Your task is to summarize with the given instruction
+-- run sf_repl "arg0" to get the instruction
+-- Output the summarization directly.
+-- Do NOT call summarize or compact
 prim_op summarize :: Tape -> String -- ^ the instruction for the summarization
     -> Reply -- ^ no need to call set_return
+
+data Prompt a = MkPrompt a
 
 compact :: Maybe String -> () = \msg ->
     let tape = current_tape ()
