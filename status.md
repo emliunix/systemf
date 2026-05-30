@@ -125,6 +125,13 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
      - I'm not sure, maybe we can make search path a static field of Ext.
 24. **Steering message** `#feature`
      - Add ability to inject steering messages into the conversation context to guide agent behavior dynamically
+     - **Change:** [`changes/59-steering-message-support.md`](changes/59-steering-message-support.md)
+     - Note: first message must be split from steering messages — the first message is the goal/topic-setting prompt, steering messages are course corrections mid-loop
+26. **SF tools feature: typed todo items** `#feature`
+     - Leverage SystemF's type system to give structure to the todo list itself
+     - Instead of free-form markdown todos, define typed todo items as SystemF data types (e.g., `data TodoStatus = Todo | InProgress | Done`, `data Todo = MkTodo Int String TodoStatus (Maybe String)`)
+     - Benefits: type-checked status transitions, typed metadata fields, REPL-queryable todo state, composable with tape/LLM primitives
+     - Enables: `todo_add`, `todo_update`, `todo_query` as typed prim_ops returning structured data instead of raw strings
 25. **Document `fork_store.py` query behavior** `#documentation`
      - Document when query operations error vs silently return empty:
        - `TapeQuery` with non-existent tape: silently returns empty results (tape_id = -1), does NOT error
