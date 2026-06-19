@@ -1,12 +1,14 @@
 # Project Status
 
-**Last Updated:** 2026-05-06
+**Last Updated:** 2026-06-20
 
 ## Conventions
 
 - Concise entries only. Heavy analysis goes to `./analysis/*_EXPLORATION.md` and is referenced here.
 - Tags: `#issue`, `#feature`, `#exploration`.
 - File paths relative to workspace root.
+- **Sequence numbers are permanent across Issues, Todo, and Completed.** When an item is completed, move it to the Completed section but keep its original number. Do not renumber remaining items. Pick the next unused number when adding a new item.
+- **Add new items to Todo.** Use tags to indicate kind: `#bug`, `#feature`, `#issue`, `#design`, `#exploration`, `#dogfooding`, `#documentation`. The existing Issues section is legacy and is being merged into Todo over time.
 
 ## Vision
 
@@ -50,21 +52,17 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
   - `append_message :: Tape -> String -> Role -> ()` — append message with type-safe role
   - `tape_handoff :: Tape -> String -> ()` — create handoff anchor
   - **Completed:** [`changes/54-tape-primitives-handoff-and-role.md`](changes/54-tape-primitives-handoff-and-role.md)
+- **#3 Bub gateway Telegram polling stall + lock cascade** `#bug`
+  - Fixed by wrapping `Bot.get_updates()` in `asyncio.wait_for(..., timeout=60.0)` (`bub/src/bub/channels/telegram.py`).
+  - Secondary `ensure_task()` lock cascade fixed by wrapping the event iterator in `try/finally: out_q.shutdown()`.
+  - **Change:** `bub/src/bub/channels/telegram.py`
+- **#4 Inflight steering messages not inserted at the right granularity** `#issue`
+  - Steering messages are now consumed between agent inner-loop turns via the steering queue.
+- **#24 Steering message** `#feature`
+  - Added ability to inject steering messages into conversation context mid-loop.
+  - **Change:** [`changes/59-steering-message-support.md`](changes/59-steering-message-support.md)
 
-## Issues
-
-1. **Command execution lost after SystemF takes control of `run_model_stream`** `#issue`
-   - When `SFHookImpl.run_model_stream` intercepts the hook, it evaluates `main.main` directly, bypassing the agent loop's `,`-prefixed command handling (`bub/src/bub/builtin/agent.py:135`).
-   - **Exploration:** [`analysis/COMMAND_EXECUTION_LOST_EXPLORATION.md`](analysis/COMMAND_EXECUTION_LOST_EXPLORATION.md)
-
-2. **Agent class mixes command handling and agent loop** `#issue`
-   - `Agent.run()` and `Agent.run_stream()` embed command dispatch inline, preventing `bub_sf` from executing commands without invoking the agent loop.
-   - **Exploration:** [`analysis/AGENT_SPLIT_EXPLORATION.md`](analysis/AGENT_SPLIT_EXPLORATION.md) — proposes `CommandProcessor` + `AgentLoop` + `TurnDispatcher` split.
-   - **Refined proposal:** [`analysis/COMMAND_FUNCTIONS_EXTRACTION.md`](analysis/COMMAND_FUNCTIONS_EXTRACTION.md) — two probed functions `run_command` and `run_command_stream` returning `| None`, no class needed.
-
-## Todo (Do check RULE)
-
-**RULE:** Todo sequence numbers are permanent. When an item is completed, move it to the Completed section but keep its original number. Do not renumber remaining items.
+## Todo
 
 1. Add workspace folder to systemf search path in bub_sf, and reconsider priority handling per search path
 3. Improve fs.read tool error message when file does not exist
@@ -127,6 +125,7 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
      - Add ability to inject steering messages into the conversation context to guide agent behavior dynamically
      - **Change:** [`changes/59-steering-message-support.md`](changes/59-steering-message-support.md)
      - Note: first message must be split from steering messages — the first message is the goal/topic-setting prompt, steering messages are course corrections mid-loop
+     - **Impl gap (2026-06-19):** Current impl feels like it appends messages to the end of the turn instead of consuming inflight. The agent loop (`agent.py`) drains the steering queue between steps via `get_prompts()`, but `ensure_task()` also chains a new `_run_agent_session` for each inbound message. If a steering message arrives after the last drain check but before loop exit, the chained task picks it up as a **new initial prompt** for a fresh session instead of mid-loop steering. Fix direction: after the loop finishes, decide if remaining queue messages warrant a new turn or should have been part of the current one.
 26. **SF tools feature: typed todo items** `#feature`
      - Leverage SystemF's type system to give structure to the todo list itself
      - Instead of free-form markdown todos, define typed todo items as SystemF data types (e.g., `data TodoStatus = Todo | InProgress | Done`, `data Todo = MkTodo Int String TodoStatus (Maybe String)`)
@@ -141,6 +140,26 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
        - `fork_tape` with no entries or tool_call without assistant entry: errors
      - Document auto-creation behavior: `append` auto-creates tape via `_get_or_create_tape`, `create` is `INSERT OR IGNORE` (no-op if exists), but `fork`/`rename`/`reset` require explicit creation
      - Add docstrings to `SQLiteForkTapeStore`, `CoreOps`, and `BuildQueryImpl` public methods
+26. **Inferior tape**, #feature, the tape that has a stable name derived from the parent tape.
+
+27. **Remove `LLM` type; move streaming marker to pragma** `#issue` `#design`
+    - `LLM a` was overloaded to mean both "LLM-synthesized value" and "stream through the agent loop", making it uncomposable.
+    - Sequencing two LLM calls needs a monad that SystemF does not have.
+    - **Decision:** drop `LLM a`. Carry intent via the `{-# LLM #-}` pragma and attributes (e.g. `stream`, `notools`). Functions return ordinary types; the pragma controls synthesis and streaming.
+
+28. **Command execution lost after SystemF takes control of `run_model_stream`** `#issue`
+    - When `SFHookImpl.run_model_stream` intercepts the hook, it evaluates `main.main` directly, bypassing the agent loop's `,`-prefixed command handling (`bub/src/bub/builtin/agent.py:135`).
+    - **Exploration:** [`analysis/COMMAND_EXECUTION_LOST_EXPLORATION.md`](analysis/COMMAND_EXECUTION_LOST_EXPLORATION.md)
+
+29. **Agent class mixes command handling and agent loop** `#issue`
+    - `Agent.run()` and `Agent.run_stream()` embed command dispatch inline, preventing `bub_sf` from executing commands without invoking the agent loop.
+    - **Exploration:** [`analysis/AGENT_SPLIT_EXPLORATION.md`](analysis/AGENT_SPLIT_EXPLORATION.md) — proposes `CommandProcessor` + `AgentLoop` + `TurnDispatcher` split.
+    - **Refined proposal:** [`analysis/COMMAND_FUNCTIONS_EXTRACTION.md`](analysis/COMMAND_FUNCTIONS_EXTRACTION.md) — two probed functions `run_command` and `run_command_stream` returning `| None`, no class needed.
+
+30. **`,command` execution blocked by tape lock / agent session** `#issue`
+    - User-issued `,`-prefixed commands should execute **immediately** without waiting for the current agent loop to finish.
+    - Current behavior: commands queue up behind `ensure_task()` just like regular messages, because `run_model_stream()` takes the session lock and all inbound messages are funneled through the same serialization path.
+    - **Related:** #4 (steering granularity) — commands are a special case of steering that need bypass logic.
 
 ## Entry Points
 
