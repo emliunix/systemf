@@ -7,7 +7,7 @@ from pyrsistent import PMap, pmap
 from systemf.elab3.core_extra import CoreBuilderExtra
 from systemf.elab3.types.ast import ImportDecl
 from systemf.elab3.types.core import C, CoreTm, CoreVar
-from systemf.elab3.types.protocols import NameGenerator, REPLSessionProto, Synthesizer
+from systemf.elab3.types.protocols import NameGenerator, REPLSessionProto, Synthesizer, TyLookup
 from systemf.surface.parser import parse_expression, parse_program, ParseError
 from systemf.surface.types import SurfaceTermDeclaration
 
@@ -297,16 +297,26 @@ def mk_mod_inst(mod: Module, get_primop: Callable[[Name, AnId], Val]) -> dict[Na
             case _: pass
     return mod_inst
 
+
 def _mk_data(tag: int) -> Callable[[list[Val]], Val]:
     def _con(args: list[Val]) -> Val:
         return VData(tag, args)
     return _con
 
 
-def fun_call_tm(fun: Id, args: list[Val]) -> CoreTm:
+def fun_call_tm(fun: str | Id, args: list[Val]) -> CoreTm:
+    match fun:
+        case str():
+            parts = fun.split(".")
+            mod = ".".join(parts[:-1])
+            name = parts[-1]
+            ctx.
+            thing = ctx.lookup()
+            if not isinstance(thing, AnId):
+                raise Exception(f"Expected AnId for {fun}, got {thing}")
     tm: CoreTm = C.var(fun)
     return functools.reduce(
         lambda acc, arg: C.app(acc, CoreValUnsafe(arg)),
-        reversed(args),
+        args,
         tm
     )
