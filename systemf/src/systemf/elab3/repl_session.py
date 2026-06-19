@@ -15,7 +15,7 @@ from . import pipeline
 from .pipeline import Code
 from . import builtins as bi
 from .name_gen import NameGeneratorImpl, check_dups
-from .reader_env import ImportSpec, RdrName, ReaderEnv, ImportRdrElt, QualName
+from .reader_env import ImportSpec, RdrName, ReaderEnv, ImportRdrElt, QualName, UnqualName
 from .eval import Evaluator, EvalCtx
 from .types import Module, TyThing, REPLContext, Name
 from .types.ty import Id, Ty, TyConApp, TyFun
@@ -134,8 +134,9 @@ class REPLSession(EvalCtx, REPLSessionProto):
         repl_mod = pipeline.execute(self.ctx, mod_name, file_path, ast,
                                     reader_env=self.reader_env,
                                     type_env=self._tythings_map.copy())
-        self.extend_tythings_rdr([thing for _, thing in repl_mod.tythings])
         mod_inst = await self.eval_mod(repl_mod)
+        # update self
+        self.extend_tythings_rdr([thing for _, thing in repl_mod.tythings])
         self.mod_insts[mod_name] = mod_inst
 
         if is_expr:
@@ -154,6 +155,28 @@ class REPLSession(EvalCtx, REPLSessionProto):
     async def unsafe_eval(self, input: CoreTm, envs: PMap[int, Val] | None = None) -> Val:
         return await self._evaluator._eval_expr(input, envs or pmap())
 
+    def resolve_name(self, name: str) -> Id:
+        """
+        Resolve a name in the REPL session. We expose Id cause things should have been typed already. 
+        """
+        parts = name.split(".")
+        mod = ".".join(parts[:-1] or ["main"])
+        item = parts[-1]
+
+        rdr = ReaderEnv.from_elts([
+            ImportRdrElt.create(name, ImportSpec(mod, None, False))
+            for name, _ in self.ctx.load(mod).tythings
+        ])
+        match rdr.lookup(UnqualName(item)):
+            case [ImportRdrElt(name=_name)]:
+                if (thing := self.ctx.load(_name.mod).lookup_tything(_name)) is None:
+                    raise Exception(f"Name {_name} not found in module {_name.mod}")
+                return _tything_id(thing)
+            case []:
+                raise Exception(f"Name {item} not found in module {mod}")
+            case _:
+                raise Exception(f"Ambiguous name {item} in module {mod}")
+
     # --- EvalCtx implementation ---------------------------------------------
 
     @property
@@ -164,16 +187,6 @@ class REPLSession(EvalCtx, REPLSessionProto):
     def get_session(self) -> REPLSessionProto | None:
         return self
     
-    def resolve_name(self, occ: RdrName) -> Name:
-        names = self.reader_env.lookup(occ)
-        match names:
-            case [ImportRdrElt(name=name)]:
-                return name
-            case []:
-                raise Exception(f"Name {occ} not found")
-            case _:
-                raise Exception(f"Ambiguous name {occ}: {names}")
-
     def lookup(self, name: Name) -> TyThing:
         # REPL Session is like a special module, check first.
         if (thing := self._tythings_map.get(name)) is not None:
@@ -184,7 +197,7 @@ class REPLSession(EvalCtx, REPLSessionProto):
         raise Exception(f"Name {name} not found in REPL session")
 
     @override
-    async def lookup_gbl(self, name: Name) -> Val:
+    async def lookup_val(self, name: Name) -> Val:
         """Resolve a global name, loading and evaluating modules on demand."""
         mod_name = name.mod
 
@@ -304,19 +317,34 @@ def _mk_data(tag: int) -> Callable[[list[Val]], Val]:
     return _con
 
 
-def fun_call_tm(fun: str | Id, args: list[Val]) -> CoreTm:
-    match fun:
-        case str():
-            parts = fun.split(".")
-            mod = ".".join(parts[:-1])
-            name = parts[-1]
-            ctx.
-            thing = ctx.lookup()
-            if not isinstance(thing, AnId):
-                raise Exception(f"Expected AnId for {fun}, got {thing}")
+def _tything_id(thing: TyThing) -> Id:
+    match thing:
+        case AnId(id=id):
+            return id
+        case _:
+            raise Exception(f"Expected AnId, got: {thing}")
+
+
+def mk_funcall(fun: Id, args: list[Val]) -> CoreTm:
+    """Call a function by name with the given arguments."""
     tm: CoreTm = C.var(fun)
     return functools.reduce(
         lambda acc, arg: C.app(acc, CoreValUnsafe(arg)),
         args,
         tm
+    )
+
+
+def mk_funcall_by_name(fun: str, args: list[Val], repl: REPLSessionProto) -> CoreTm:
+    """Call a function by name with the given arguments."""
+    fun_id = repl.resolve_name(fun)
+    return mk_funcall(fun_id, args)
+
+
+def mk_funcall_unsafe_fun(fun: Val, args: list[Val]) -> CoreTm:
+    """Call a function by Val with the given arguments."""
+    return functools.reduce(
+        lambda acc, arg: C.app(acc, CoreValUnsafe(arg)),
+        args,
+        CoreValUnsafe(fun)
     )

@@ -1,0 +1,5 @@
+import builtins
+
+double :: Int -> Int = \x -> int_plus x x
+
+add :: Int -> Int -> Int = \x y -> int_plus x y
