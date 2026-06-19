@@ -108,3 +108,21 @@ async def test_mk_funcall_by_name_unknown_name_raises():
 
     with pytest.raises(Exception, match="not found"):
         mk_funcall_by_name("NoSuchModule.no_such_name", [], session)
+
+
+async def test_sequence_operator_single_line():
+    """The ; operator evaluates to the right-hand value."""
+    repl = REPL()
+    session = repl.new_session()
+    result = await session.eval("1 ; 2")
+    assert result is not None
+    assert result[0] == VLit(LitInt(2))
+
+
+async def test_sequence_operator_multiline():
+    """The ; operator works across aligned lines."""
+    repl = REPL()
+    session = repl.new_session()
+    result = await session.eval("1 ;\n2")
+    assert result is not None
+    assert result[0] == VLit(LitInt(2))

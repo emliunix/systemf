@@ -896,6 +896,45 @@ class TestOperatorParser:
         result = expr_parser(AnyIndent()).parse(tokens)
         assert result is not None
 
+    def test_sequence_single_line(self):
+        """Parse x ; y as a sequence expression."""
+        tokens = lex("x ; y")
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceOp(
+            left=SurfaceVar(name="x"),
+            op=";",
+            right=SurfaceVar(name="y"),
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_sequence_multiple(self):
+        """Parse a ; b ; c as a left-associative sequence."""
+        tokens = lex("a ; b ; c")
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceOp(
+            left=SurfaceOp(
+                left=SurfaceVar(name="a"),
+                op=";",
+                right=SurfaceVar(name="b"),
+            ),
+            op=";",
+            right=SurfaceVar(name="c"),
+        )
+        assert equals_ignore_location(result, expected)
+
+    def test_sequence_multiline_aligned(self):
+        """Parse a multiline sequence with aligned operands."""
+        source = """a ;
+b"""
+        tokens = lex(source)
+        result = expr_parser(AnyIndent()).parse(tokens)
+        expected = SurfaceOp(
+            left=SurfaceVar(name="a"),
+            op=";",
+            right=SurfaceVar(name="b"),
+        )
+        assert equals_ignore_location(result, expected)
+
 
 class TestComplexExpressions:
     """Test complex expression combinations."""
