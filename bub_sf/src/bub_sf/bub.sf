@@ -17,6 +17,13 @@ prim_op tape_make :: Maybe Tape -- ^ optional parent tape
   -> String -- ^ name for the new tape
   -> Tape
 
+-- | get the inferior tape with a stable name derived from the parent tape
+prim_op inferior_tape :: Tape -- ^ the parent tape
+  -> String -- ^ the name for the inferior tape
+  -> Tape
+
+prim_op run_tape_with_autocompaction :: forall a. Tape -> (Tape -> a) -> a
+
 -- | Message role for tape entries
 data Role = User | Assistant
 
@@ -53,5 +60,5 @@ compact :: Maybe String -> () = \msg ->
         instr = "summarize all the discussions so far\n" ++ (fromMaybe "" msg)
         summary = un_reply (summarize (tape_fork tape (Just "for/summarize")) instr)
     in
-        -- hand crafted id monad to sequence the ops
-        (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "compaction")
+        tape_handoff tape "compaction" ;
+        tape_append tape Assistant summary
