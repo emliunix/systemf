@@ -134,7 +134,7 @@ def _run_tape_with_autocompaction(args: list[Val], session: REPLSessionProto | N
     async def _go():
         info = await agent.tapes.info(tape_name)
         if info.entries_since_last_anchor > 20:
-            await session.unsafe_eval(mk_funcall_by_name("bub.compact", [bi.NOTHING_VAL], session))
+            await session.unsafe_eval(mk_funcall_by_name("bub.tape_compact", [VPrim(tape_name), bi.NOTHING_VAL], session))
         return await session.unsafe_eval(mk_funcall_unsafe_fun(func, [VPrim(tape_name)]))
     return VAsync(_go())
 
