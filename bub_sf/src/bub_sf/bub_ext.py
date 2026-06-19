@@ -1,11 +1,17 @@
-from ast import arg
+"""
+Primitive types layout:
+
+- Steering: asyncio.Queue[Prompt]
+- Tape: str
+- LLM a: [AsyncStreamEvents[TurnResult], Val]
+
+"""
 import asyncio
 import uuid
 
 from pathlib import Path
 from typing import Any, TypedDict, Unpack, cast, overload, override
-from collections.abc import AsyncIterator, Callable, Generator
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Generator
 
 from loguru import logger
 from bub.builtin.agent import Agent
@@ -16,14 +22,13 @@ from republic.core.results import AsyncStreamEvents, FinalEvent, Finished, Promp
 
 from bub_sf.store.fork_store import SQLiteForkTapeStore
 from republic.tape.entries import TapeEntry
-from republic.tape.manager import AsyncTapeManager
 from systemf.elab3 import builtins as bi
-from systemf.elab3.repl_session import fun_call_tm
+from systemf.elab3.repl_session import mk_funcall_by_name, mk_funcall_unsafe_fun
 from systemf.elab3.val_pp import pp_val
 from systemf.elab3.types.protocols import Ext, REPLSessionProto, Synthesizer
-from systemf.elab3.types.ty import LitString, Name, Ty, TyConApp, TyForall, TyFun, TyString
+from systemf.elab3.types.ty import LitString, Name, Ty, TyConApp, TyString
 from systemf.elab3.types.tything import AnId
-from systemf.elab3.types.val import VAsync, VData, VLit, VPrim, Val
+from systemf.elab3.types.val import VAsync, VClosure, VData, VLit, VPrim, Val
 from systemf.elab3.types.vpartial import VPartial, SessionAwareFinish
 
 
@@ -121,13 +126,17 @@ def _tape_handoff(args: list[Val], session: REPLSessionProto | None) -> Val:
 
 
 def _run_tape_with_autocompaction(args: list[Val], session: REPLSessionProto | None) -> Val:
+    if session is None:
+        raise Exception("run_tape_with_autocompaction must be called with a valid session")
     agent = _get_agent(session)
-    tape_name = prim_val(args[0])
-    func = prim_val(args[1])
+    tape_name: str = prim_val(args[0])
+    func: VClosure = prim_val(args[1])
     async def _go():
         info = await agent.tapes.info(tape_name)
         if info.entries_since_last_anchor > 20:
-            await session.unsafe_eval(fun_call_tm())
+            await session.unsafe_eval(mk_funcall_by_name("bub.tape_compact", [VPrim(tape_name)], session))
+        return await session.unsafe_eval(mk_funcall_unsafe_fun(func, [VPrim(tape_name)]))
+    return VAsync(_go())
 
 
 class BubOps(Synthesizer):
