@@ -248,9 +248,11 @@ class SFHookImpl:
         res = await session.repl.unsafe_eval(fun_call_tm(info.main.id, vals_))
         match res:
             case VPrim([AsyncStreamEvents() as events, _]):
-                async for event in events:
-                    await out_q.put(event)
-                out_q.shutdown()
+                try:
+                    async for event in events:
+                        await out_q.put(event)
+                finally:
+                    out_q.shutdown()
             case _:
                 raise Exception(f"Expected AsyncStreamEvents from main.main, got {res}")
 
