@@ -56,8 +56,10 @@ prim_op summarize :: Tape -> String -- ^ the instruction for the summarization
 data Prompt a = MkPrompt a
 
 compact :: Maybe String -> () = \msg ->
-    let tape = current_tape ()
-        instr = "summarize all the discussions so far\n" ++ (fromMaybe "" msg)
+    tape_compact (current_tape ()) msg
+
+tape_compact :: Tape -> Maybe String -> () = \tape msg ->
+    let instr = "summarize all the discussions so far\n" ++ (fromMaybe "" msg)
         summary = un_reply (summarize (tape_fork tape (Just "for/summarize")) instr)
     in
         tape_handoff tape "compaction" ;

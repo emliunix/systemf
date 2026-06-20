@@ -28,7 +28,7 @@ from systemf.elab3.val_pp import pp_val
 from systemf.elab3.types.protocols import Ext, REPLSessionProto, Synthesizer
 from systemf.elab3.types.ty import LitString, Name, Ty, TyConApp, TyString
 from systemf.elab3.types.tything import AnId
-from systemf.elab3.types.val import VAsync, VClosure, VData, VLit, VPrim, Val
+from systemf.elab3.types.val import VAsync, VData, VLit, VPrim, Val
 from systemf.elab3.types.vpartial import VPartial, SessionAwareFinish
 
 
@@ -130,11 +130,11 @@ def _run_tape_with_autocompaction(args: list[Val], session: REPLSessionProto | N
         raise Exception("run_tape_with_autocompaction must be called with a valid session")
     agent = _get_agent(session)
     tape_name: str = prim_val(args[0])
-    func: VClosure = prim_val(args[1])
+    func = args[1]
     async def _go():
         info = await agent.tapes.info(tape_name)
         if info.entries_since_last_anchor > 20:
-            await session.unsafe_eval(mk_funcall_by_name("bub.tape_compact", [VPrim(tape_name)], session))
+            await session.unsafe_eval(mk_funcall_by_name("bub.tape_compact", [VPrim(tape_name), bi.NOTHING_VAL], session))
         return await session.unsafe_eval(mk_funcall_unsafe_fun(func, [VPrim(tape_name)]))
     return VAsync(_go())
 
@@ -165,6 +165,8 @@ class BubOps(Synthesizer):
                 return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_tape_append))
             case "tape_handoff":
                 return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_tape_handoff))
+            case "run_tape_with_autocompaction":
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_run_tape_with_autocompaction))
             case _:
                 return None
 
