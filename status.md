@@ -161,8 +161,22 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - Current behavior: commands queue up behind `ensure_task()` just like regular messages, because `run_model_stream()` takes the session lock and all inbound messages are funneled through the same serialization path.
     - **Related:** #4 (steering granularity) — commands are a special case of steering that need bypass logic.
 
+31. **`summarize` prompt needs improvement** `#bug`
+    - The `{-# LLM notools #-}` prim_op spawns a sub-agent, but the sub-agent still needs explicit instructions to output the summarization directly without attempting tool calls or `set_return`.
+    - Current prompt steering is insufficient.
+
+32. **Delegate tape to subagent** `#issue`
+    - When a sub-agent (e.g., from `summarize`) is running, the parent agent is inherently inactive/blocked. The current tape is locked as "in use", so the sub-agent cannot operate on the same tape.
+    - `summarize` should internally fork the tape and spawn the sub-agent on the fork.
+    - Manual fork + summarize currently hits `max_steps_reached=50`.
+    - design: maybe we can lock session at run_model_stream level, instead of current subagent call level. The real concern we try to solve with session lock is to prevent concurrent modification to tape.
+
+33. **Experiment seuqence LLM calls** `#feature`
+    - It's often the case the workflow has steps, each has it's goal. Yet we'd like them to share a tape so it has accumulated global view, but with different focuses.
+    - example: `do_a ; do_b ; do_c`, each with its own Prompt.
+
 ## Entry Points
 
-- **Bub CLI**: `cd bub && uv run bub chat`
-- **Bub Gateway**: `cd bub && uv run bub gateway`
-- **SystemF REPL**: `cd systemf && uv run python -m systemf.elab3.repl_main`
+- **Bub CLI**: `uv run bub chat`
+- **Bub Gateway**: `uv run bub gateway`
+- **SystemF REPL**: `uv run python -m systemf.elab3.repl_main`
