@@ -229,30 +229,32 @@ class SFHookImpl:
         return AsyncStreamEvents(_out())
 
     async def _run_agent_session(self, session: SessionInfo, state: State, out_q: asyncio.Queue[StreamEvent[LLMResult]]) -> None:
-        if session.queue.empty():
-            return
-        session.repl.state["bub_state"] = state
-        # eval: main prompt
-        info = MainInfo.from_session(session.repl)
-        str_val = None
-        q_val = None
-        vals: list[tuple[int, Val]] = []
-        match info.str_ty:
-            case (i, _):
-                prompt = await session.queue.get()
-                vals.append((i, VLit(LitString(prompt))))
-        match info.prompt_ty:
-            case (i, _):
-                vals.append((i, VPrim(session.queue)))
-        vals_ = [val for _, val in sorted(vals)]
-        res = await session.repl.unsafe_eval(fun_call_tm(info.main.id, vals_))
-        match res:
-            case VPrim([AsyncStreamEvents() as events, _]):
-                async for event in events:
-                    await out_q.put(event)
-                out_q.shutdown()
-            case _:
-                raise Exception(f"Expected AsyncStreamEvents from main.main, got {res}")
+        try:
+            if session.queue.empty():
+                return
+            session.repl.state["bub_state"] = state
+            # eval: main prompt
+            info = MainInfo.from_session(session.repl)
+            str_val = None
+            q_val = None
+            vals: list[tuple[int, Val]] = []
+            match info.str_ty:
+                case (i, _):
+                    prompt = await session.queue.get()
+                    vals.append((i, VLit(LitString(prompt))))
+            match info.prompt_ty:
+                case (i, _):
+                    vals.append((i, VPrim(session.queue)))
+            vals_ = [val for _, val in sorted(vals)]
+            res = await session.repl.unsafe_eval(fun_call_tm(info.main.id, vals_))
+            match res:
+                case VPrim([AsyncStreamEvents() as events, _]):
+                    async for event in events:
+                        await out_q.put(event)
+                case _:
+                    raise Exception(f"Expected AsyncStreamEvents from main.main, got {res}")
+        finally:
+            out_q.shutdown()
 
     @hookimpl
     def system_prompt(self, state: State) -> str:
