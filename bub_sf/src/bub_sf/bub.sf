@@ -64,3 +64,35 @@ compact :: Maybe String -> () = \msg ->
     in
         -- hand crafted id monad to sequence the ops
         (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "compaction")
+
+-- | Conclude the current task by summarizing the tape.
+-- | Output follows the standard task-conclusion format:
+-- | Goal, Completed Work, Key Decisions, Next Steps, Critical Context, Relevant Files.
+conclude :: Maybe String -> () = \msg ->
+    let tape = current_tape ()
+        instr =
+            "Conclude the task. Output a Markdown summary with these sections:\n"
+            ++ "\n"
+            ++ "## Goal\n"
+            ++ "- [original task or objective]\n"
+            ++ "\n"
+            ++ "## Completed Work\n"
+            ++ "- [what was implemented or fixed]\n"
+            ++ "\n"
+            ++ "## Key Decisions\n"
+            ++ "- [important choices and why]\n"
+            ++ "\n"
+            ++ "## Next Steps\n"
+            ++ "- [ordered follow-up actions or (none)]\n"
+            ++ "\n"
+            ++ "## Critical Context\n"
+            ++ "- [technical facts, errors, open questions]\n"
+            ++ "\n"
+            ++ "## Relevant Files\n"
+            ++ "- [file paths and why they matter]\n"
+            ++ "\n"
+            ++ "Additional context:\n"
+            ++ (fromMaybe "" msg)
+        summary = un_reply (summarize (tape_fork tape (Just "for/conclude")) instr)
+    in
+        (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "conclusion")

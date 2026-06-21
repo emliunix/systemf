@@ -70,7 +70,9 @@ Some handful builtins:
 -- compact the tape (replacing tape_handoff with explicity summarization)
 compact (Just "what/how to compact")
 -- for general compaction
-compact Nothing 
+compact Nothing
+-- conclude the current task with a structured summary
+conclude (Just "optional extra context")
 ```
 
 """
