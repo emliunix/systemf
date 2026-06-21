@@ -49,9 +49,10 @@ un_reply :: Reply -> String = \r -> case r of
 
 {-# LLM notools #-}
 -- | Your task is to summarize with the given instruction
--- run sf_repl "arg0" to get the instruction
--- Output the summarization directly.
--- Do NOT call summarize or compact
+-- | run sf_repl "arg0" to get the instruction
+-- | Output the summarization directly.
+-- | Do NOT call summarize or compact
+-- | @include "summarize.md"
 prim_op summarize :: Tape -> String -- ^ the instruction for the summarization
     -> Reply -- ^ no need to call set_return
 
@@ -65,34 +66,10 @@ compact :: Maybe String -> () = \msg ->
         -- hand crafted id monad to sequence the ops
         (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "compaction")
 
--- | Conclude the current task by summarizing the tape.
--- | Output follows the standard task-conclusion format:
--- | Goal, Completed Work, Key Decisions, Next Steps, Critical Context, Relevant Files.
+-- | Conclude the current task using the summarize template.
 conclude :: Maybe String -> () = \msg ->
     let tape = current_tape ()
-        instr =
-            "Conclude the task. Output a Markdown summary with these sections:\n"
-            ++ "\n"
-            ++ "## Goal\n"
-            ++ "- [original task or objective]\n"
-            ++ "\n"
-            ++ "## Completed Work\n"
-            ++ "- [what was implemented or fixed]\n"
-            ++ "\n"
-            ++ "## Key Decisions\n"
-            ++ "- [important choices and why]\n"
-            ++ "\n"
-            ++ "## Next Steps\n"
-            ++ "- [ordered follow-up actions or (none)]\n"
-            ++ "\n"
-            ++ "## Critical Context\n"
-            ++ "- [technical facts, errors, open questions]\n"
-            ++ "\n"
-            ++ "## Relevant Files\n"
-            ++ "- [file paths and why they matter]\n"
-            ++ "\n"
-            ++ "Additional context:\n"
-            ++ (fromMaybe "" msg)
+        instr = "conclude the task\n" ++ (fromMaybe "" msg)
         summary = un_reply (summarize (tape_fork tape (Just "for/conclude")) instr)
     in
         (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "conclusion")

@@ -71,8 +71,6 @@ Some handful builtins:
 compact (Just "what/how to compact")
 -- for general compaction
 compact Nothing
--- conclude the current task with a structured summary
-conclude (Just "optional extra context")
 ```
 
 """
