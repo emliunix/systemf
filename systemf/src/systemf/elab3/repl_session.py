@@ -307,6 +307,6 @@ def fun_call_tm(fun: Id, args: list[Val]) -> CoreTm:
     tm: CoreTm = C.var(fun)
     return functools.reduce(
         lambda acc, arg: C.app(acc, CoreValUnsafe(arg)),
-        reversed(args),
+        args,
         tm
     )
