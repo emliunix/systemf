@@ -174,6 +174,10 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - `inferior_tape :: String -> Tape -> Tape` — declared `bub_sf/src/bub_sf/bub.sf:36`, used `main.sf:29`, but **no `_inferior_tape` impl and no `get_primop` case** in `bub_ext.py`.
   - Add declarations to `bub.sf`, implementations to `BubOps` in `bub_ext.py`, and dispatch in `get_primop`.
 
+39. **`bub sf-check --help` hangs / requires terminal input** `#bug`
+    - Running `uv run bub sf-check --help` opens an interactive pager/editor and does not return when stdout is not a terminal.
+    - Expected: print usage and exit immediately, like other CLI commands.
+
 ## Entry Points
 
 - **Bub CLI**: `uv run bub chat`
