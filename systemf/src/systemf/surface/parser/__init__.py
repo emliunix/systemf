@@ -15,11 +15,7 @@ NOTE: the whole parser is AI generated.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from parsy import eof
-
-from systemf.surface.parser.macros import render_macros
 
 # Re-export token types and layout constraints
 from systemf.surface.parser.types import (
@@ -164,7 +160,6 @@ def parse_expression(source: str, filename: str = "<stdin>"):
     """
     from parsy import eof
 
-    source = render_macros(Path(filename), source)
     tokens = list(lex(source, filename))
     try:
         return (expressions.expr_parser(AnyIndent()) << eof).parse(tokens)
@@ -187,7 +182,6 @@ def parse_declaration(source: str, filename: str = "<stdin>"):
     """
     from parsy import eof
 
-    source = render_macros(Path(filename), source)
     tokens = list(lex(source, filename))
     try:
         return (declarations.decl_parser() << eof).parse(tokens)
@@ -208,7 +202,6 @@ def parse_type(source: str, filename: str = "<stdin>"):
     Raises:
         ParseError: If parsing fails
     """
-    source = render_macros(Path(filename), source)
     tokens = list(lex(source, filename))
     try:
         return (type_parser() << eof).parse(tokens)
@@ -237,7 +230,6 @@ def parse_program(source: str, filename: str = "<stdin>") -> tuple[
     """
     from systemf.surface.parser.types import ImportToken
 
-    source = render_macros(Path(filename), source)
     tokens = list(lex(source, filename))
     try:
         imports, rest = top_import_parser().parse_partial(tokens)

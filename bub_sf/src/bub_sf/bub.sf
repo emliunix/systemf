@@ -52,7 +52,7 @@ un_reply :: Reply -> String = \r -> case r of
 -- | run sf_repl "arg0" to get the instruction
 -- | Output the summarization directly.
 -- | Do NOT call summarize or compact
--- | @include "summarize.md"
+-- | @include("summarize.md")
 prim_op summarize :: Tape -> String -- ^ the instruction for the summarization
     -> Reply -- ^ no need to call set_return
 

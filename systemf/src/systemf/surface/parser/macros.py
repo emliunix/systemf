@@ -1,16 +1,17 @@
 """Source-level macro preprocessing for the surface parser.
 
-`render_macros` performs textual expansion of comment-level macros before
-lexing.  Currently supported:
+`expand_comment_macros` performs textual expansion of `@include` directives
+inside stripped comment text.  It is called by the comment parser after
+comment syntax (`--`, `|`, `^`) has been removed and consecutive comment lines
+have been joined, but before the resulting docstring is attached to the AST.
 
-- A comment line containing only `@include "path"` (or `@include 'path'`)
-  is replaced in-place by the raw contents of the referenced file.
-  Relative paths are resolved against the directory of the file being parsed.
+Currently supported:
 
-The expansion is intentionally "dumb": no comment syntax is added to or
-removed from the included file content.  The directive line itself is replaced
-entirely by the file content.  This pass runs before lexing, so it executes
-before any comment/docstring concatenation performed by the lexer.
+- `@include("path")` (or `@include('path')`) anywhere inside a comment
+  string is replaced by the raw contents of the referenced file.
+- Relative paths are resolved against the directory of the file being parsed.
+- Included files may themselves contain `@include` directives; cycles are
+  detected and rejected.
 """
 
 from __future__ import annotations
@@ -28,43 +29,34 @@ class MacroError(Exception):
         self.path = path
 
 
-# Matches a single-line comment whose only content is an include directive.
-# Captures:
-#   1. the quote character used (" or ')
-#   2. the path inside the quotes
-_INCLUDE_RE = re.compile(
-    r"^[ \t]*--[ \t]*(?:\|[ \t]*|\^[ \t]*)?@include[ \t]+([\"'])(.*?)\1[ \t]*(?:\r?\n)?$"
-)
+# Matches an @include directive inside stripped comment text.
+_INCLUDE_RE = re.compile(r"@include\s*\(\s*([\"'])(.*?)\1\s*\)")
 
 
-def render_macros(file: Path, text: str) -> str:
-    """Expand comment macros in source text.
+def expand_comment_macros(text: str, source_file: Path) -> str:
+    """Expand @include directives inside a comment string.
 
     Args:
-        file: Path to the file being parsed.  Used to resolve relative
-            include paths and to produce helpful error messages.
-        text: Raw source text.
+        text: Comment text after comment syntax has been stripped.
+        source_file: Path to the file containing the comment. Used to
+            resolve relative include paths and produce helpful errors.
 
     Returns:
-        Source text with macros expanded.
+        Comment text with @include directives expanded.
 
     Raises:
         MacroError: If an include cannot be resolved or a cycle is detected.
     """
-    base_dir = file.parent if file else Path.cwd()
-    return _expand(text, base_dir, file, set())
+    base_dir = source_file.parent if source_file else Path.cwd()
+    return _expand(text, base_dir, source_file, set())
 
 
 def _expand(text: str, base_dir: Path, source_file: Path, seen: set[Path]) -> str:
-    lines = text.splitlines(keepends=True)
-    out: list[str] = []
+    result: list[str] = []
+    pos = 0
 
-    for line in lines:
-        match = _INCLUDE_RE.match(line)
-        if not match:
-            out.append(line)
-            continue
-
+    for match in _INCLUDE_RE.finditer(text):
+        result.append(text[pos : match.start()])
         raw_path = match.group(2)
         included_path = _resolve_include(raw_path, base_dir)
 
@@ -94,10 +86,11 @@ def _expand(text: str, base_dir: Path, source_file: Path, seen: set[Path]) -> st
             seen | {included_path},
         )
 
-        # Replace the directive line with the raw included content.
-        out.append(expanded)
+        result.append(expanded)
+        pos = match.end()
 
-    return "".join(out)
+    result.append(text[pos:])
+    return "".join(result)
 
 
 def _resolve_include(raw_path: str, base_dir: Path) -> Path:

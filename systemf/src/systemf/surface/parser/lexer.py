@@ -7,7 +7,9 @@ No virtual indentation tokens - stateful parser will handle layout.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
+from systemf.surface.parser.macros import expand_comment_macros
 from systemf.surface.parser.types import (
     AsToken,
     CaseToken,
@@ -431,24 +433,29 @@ def lex(source: str, filename: str | None = None) -> list[TokenBase]:
         List of tokens with comments processed
     """
     tokens = Lexer(source, filename).tokenize()
-    tokens = process_comments(tokens)
+    source_path = Path(filename) if filename else Path.cwd() / "<stdin>"
+    tokens = process_comments(tokens, source_path)
     tokens = strip_comments_and_whitespace(tokens)
     return tokens
 
 
-def process_comments(tokens: list[TokenBase]) -> list[TokenBase]:
-    """Process comments: join consecutive lines and classify docstrings.
+def process_comments(tokens: list[TokenBase], source_file: Path) -> list[TokenBase]:
+    """Process comments: join consecutive lines, expand macros, classify docstrings.
 
-    This is a post-lexer pass with nested while loop style:
+    This is the comment parser.  It runs as a post-lexer pass with a nested
+    while loop style:
     1. Outer loop finds potential docstring start
     2. Inner loop (when marker | or ^ found) consumes all consecutive comment lines
     3. First line: strip leading space (Idris2-style) then marker
     4. Subsequent lines: strip leading space only (marker already stripped by lexer)
-    5. Classifies as DOCSTRING_PRECEDING (|) or DOCSTRING_INLINE (^)
-    6. Stops at new docstring (| or ^) or blank line or non-comment
+    5. Expand any @include directives inside the joined comment text
+    6. Classifies as DOCSTRING_PRECEDING (|) or DOCSTRING_INLINE (^)
+    7. Stops at new docstring (| or ^) or blank line or non-comment
 
     Args:
         tokens: Raw tokens from lexer
+        source_file: Path to the source file, used to resolve relative
+            include paths in @include directives.
 
     Returns:
         Tokens with docstrings processed, regular comments filtered
@@ -527,6 +534,7 @@ def process_comments(tokens: list[TokenBase]) -> list[TokenBase]:
 
                 # Create the docstring token
                 content = "\n".join(lines)
+                content = expand_comment_macros(content, source_file)
                 doc_type = DocstringType.PRECEDING if marker == "|" else DocstringType.FOLLOWING
                 result.append(
                     DocstringToken(docstring_type=doc_type, content=content, location=location)
