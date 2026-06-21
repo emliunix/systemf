@@ -65,11 +65,3 @@ compact :: Maybe String -> () = \msg ->
     in
         -- hand crafted id monad to sequence the ops
         (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "compaction")
-
--- | Conclude the current task using the summarize template.
-conclude :: Maybe String -> () = \msg ->
-    let tape = current_tape ()
-        instr = "conclude the task\n" ++ (fromMaybe "" msg)
-        summary = un_reply (summarize (tape_fork tape (Just "for/conclude")) instr)
-    in
-        (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "conclusion")
