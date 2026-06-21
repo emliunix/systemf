@@ -67,22 +67,33 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
   - **Supersedes:** [`changes/56-per-session-message-serialization.md`](changes/56-per-session-message-serialization.md)
 - **#25 Document `fork_store.py` query behavior** `#documentation`
   - Documented in [`docs/tape.md`](docs/tape.md): error-vs-silent-empty matrix, auto-creation rules, schema/views, `fork_tape` tool_call special case, anchor resolution, transaction model, read ordering.
+- **#21 Implement `make_tape` primitive for SystemF programs** `#dogfooding`
+  - Implemented `make_tape :: Maybe Tape -> String -> Tape` in `bub_sf/src/bub_sf/bub_ext.py`.
+  - Creates a new tape with optional parent; child tapes are named `{parent}/{name}-{suffix}`.
+  - Repaired broken test fixture (`MockSession.state` nesting) and stale `_make_tape`/`_fork_tape` references in `bub_sf/tests/test_bub_ext.py`.
+  - **Change:** [`changes/39-make-tape-primitive.md`](changes/39-make-tape-primitive.md), test repairs in [`changes/61-tape-primitives-needs-compact-and-inferior-tape.md`](changes/61-tape-primitives-needs-compact-and-inferior-tape.md)
 - **#36 Idle-triggered auto-compaction** `#feature` (channel-side done; compaction delegated to SF `main`)
   - `IdleTracker` integrated into `TelegramChannel`: registered on first message (30-min timeout), `heartbeat()` resets via message lifespan, `_on_session_idle` emits the idle signal through the normal `_on_receive` pipeline (`bub/src/bub/channels/telegram.py:160,250-275,325-332`).
-  - **Design pivot from change 57:** the `kind="idle"` `MessageKind` / `BuiltinImpl` hook handling (steps 3-5) were dropped; the idle signal is now a regular content message (`<context type="idle_event">`), and compaction is delegated to the SF `main` program (`main.sf` `with_compact`). The actual compaction primitives are tracked as a separate gap (see todo #38).
+  - **Design pivot from change 57:** the `kind="idle"` `MessageKind` / `BuiltinImpl` hook handling (steps 3-5) were dropped; the idle signal is now a regular content message (`<context type="idle_event">`), and compaction is delegated to the SF `main` program (`main.sf` `with_compact`).
   - **Design:** [`changes/57-idle-triggered-auto-compaction.md`](changes/57-idle-triggered-auto-compaction.md)
   - **Supersedes:** [`changes/51-auto-compact-session.md`](changes/51-auto-compact-session.md)
+- **#37 Inferior tape** `#feature`
+  - Implemented `inferior_tape :: String -> Tape -> Tape` as a stable `{parent}/{tag}` named child tape.
+  - Get-or-create semantics: creates the tape only when `info().anchors == 0` (no bootstrap anchor), otherwise returns the existing tape.
+  - **Change:** [`changes/61-tape-primitives-needs-compact-and-inferior-tape.md`](changes/61-tape-primitives-needs-compact-and-inferior-tape.md)
+- **#38 Implement missing SF primitives for `main.sf` compaction path** `#bug` `#dogfooding`
+  - Implemented `needs_compact :: Tape -> Bool` and `inferior_tape :: String -> Tape -> Tape`.
+  - `needs_compact` returns `TRUE` when `entries_since_last_anchor > COMPACT_THRESHOLD_ENTRIES` (threshold = 40).
+  - `inferior_tape` provides stable named child tapes for intent tracking.
+  - Fixed sibling primitive arg extractors: `_tape_append` uses `_role_val`, `_tape_make` and `_tape_handoff` use `str_val`.
+  - Repaired `MockSession` fixture and stale `_make_tape`/`_fork_tape` test references; all 11 `test_bub_ext.py` tests pass.
+  - Added `test.sf` regression guard; `uv run bub sf-check test -L .` → `OK: test`.
+  - **Change:** [`changes/61-tape-primitives-needs-compact-and-inferior-tape.md`](changes/61-tape-primitives-needs-compact-and-inferior-tape.md)
 - 30. **`,command` execution blocked by tape lock / agent session** `#issue`
     - User-issued `,`-prefixed commands should execute **immediately** without waiting for the current agent loop to finish.
     - Current behavior: commands queue up behind `ensure_task()` just like regular messages, because `run_model_stream()` takes the session lock and all inbound messages are funneled through the same serialization path.
     - **Related:** #4 (steering granularity) — commands are a special case of steering that need bypass logic.
     - dup of **28**
-
-- 38. **Implement missing SF primitives for `main.sf` compaction path** `#bug` `#dogfooding`
-  - `main.sf` calls primitives that have no implementation, blocking the idle-compaction path wired in #36:
-    - `needs_compact :: Tape -> Bool` — used `main.sf:22`, **not declared or implemented anywhere**.
-    - `inferior_tape :: String -> Tape -> Tape` — declared `bub_sf/src/bub_sf/bub.sf:36`, used `main.sf:29`, but **no `_inferior_tape` impl and no `get_primop` case** in `bub_ext.py`.
-  - Add declarations to `bub.sf`, implementations to `BubOps` in `bub_ext.py`, and dispatch in `get_primop`.
 
 ## Todo
 
@@ -128,9 +139,6 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
      - Uses per-session queue + `_ensure_agent()` worker pattern to maintain single-agent-per-session invariant
      - Works for all entry points (gateway, CLI, tests)
      - **Change:** [`changes/56-per-session-message-serialization.md`](changes/56-per-session-message-serialization.md)
-21. **Implement `make_tape` primitive for SystemF programs** `#dogfooding`
-    - `make_tape :: Maybe Tape -> String -> Tape` — create new tape with optional parent
-    - **Change:** [`changes/39-make-tape-primitive.md`](changes/39-make-tape-primitive.md)
 22. **Continue dogfooding: migrate additional skills to SystemF programs** `#dogfooding`
      - Migrate other bub tools and framework components to SystemF programs beyond tape primitives
 23. **sf-check bub missing** `#bug`
@@ -142,9 +150,6 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - Instead of free-form markdown todos, define typed todo items as SystemF data types (e.g., `data TodoStatus = Todo | InProgress | Done`, `data Todo = MkTodo Int String TodoStatus (Maybe String)`)
     - Benefits: type-checked status transitions, typed metadata fields, REPL-queryable todo state, composable with tape/LLM primitives
     - Enables: `todo_add`, `todo_update`, `todo_query` as typed prim_ops returning structured data instead of raw strings
-37. **Inferior tape** `#feature`
-    - The tape that has a stable name derived from the parent tape.
-
 27. **Remove `LLM` type; move streaming marker to pragma** `#issue` `#design`
     - `LLM a` was overloaded to mean both "LLM-synthesized value" and "stream through the agent loop", making it uncomposable.
     - Sequencing two LLM calls needs a monad that SystemF does not have.
