@@ -78,6 +78,12 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - **Related:** #4 (steering granularity) — commands are a special case of steering that need bypass logic.
     - dup of **28**
 
+- 38. **Implement missing SF primitives for `main.sf` compaction path** `#bug` `#dogfooding`
+  - `main.sf` calls primitives that have no implementation, blocking the idle-compaction path wired in #36:
+    - `needs_compact :: Tape -> Bool` — used `main.sf:22`, **not declared or implemented anywhere**.
+    - `inferior_tape :: String -> Tape -> Tape` — declared `bub_sf/src/bub_sf/bub.sf:36`, used `main.sf:29`, but **no `_inferior_tape` impl and no `get_primop` case** in `bub_ext.py`.
+  - Add declarations to `bub.sf`, implementations to `BubOps` in `bub_ext.py`, and dispatch in `get_primop`.
+
 ## Todo
 
 1. Add workspace folder to systemf search path in bub_sf, and reconsider priority handling per search path
@@ -168,15 +174,12 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - example: `do_a ; do_b ; do_c`, each with its own Prompt.
     - realized it's just plain function calls, but maybe we can sequence `Maybe` as a good helper
 
-38. **Implement missing SF primitives for `main.sf` compaction path** `#bug` `#dogfooding`
-  - `main.sf` calls primitives that have no implementation, blocking the idle-compaction path wired in #36:
-    - `needs_compact :: Tape -> Bool` — used `main.sf:22`, **not declared or implemented anywhere**.
-    - `inferior_tape :: String -> Tape -> Tape` — declared `bub_sf/src/bub_sf/bub.sf:36`, used `main.sf:29`, but **no `_inferior_tape` impl and no `get_primop` case** in `bub_ext.py`.
-  - Add declarations to `bub.sf`, implementations to `BubOps` in `bub_ext.py`, and dispatch in `get_primop`.
-
 39. **`bub sf-check --help` hangs / requires terminal input** `#bug`
     - Running `uv run bub sf-check --help` opens an interactive pager/editor and does not return when stdout is not a terminal.
     - Expected: print usage and exit immediately, like other CLI commands.
+
+40. **comment macros `@include`**, `#feature`
+    - to make prompt in its own .md file and included into the comment in the .sf file.
 
 ## Entry Points
 
