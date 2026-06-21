@@ -190,6 +190,12 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - Strip comment processing (`process_comments` and related helpers) out of `lexer.py`.
     - Make it either a standalone pass or parser logic, so the lexer/parser boundary stays clean.
 
+42. **Telegram typing indicator lifespan does not cover chained `ensure_task` work** `#issue`
+    - `TelegramChannel.start_typing` is a per-chat singleton, which is correct.
+    - However, its lifespan is currently tied to a single `_run_agent_session` task. When a SystemF program sequences multiple LLM calls via `ensure_task` (e.g., intent classification followed by `checked_run`/`run`), the first task's completion exits the lifespan and stops the typing indicator while later tasks are still running.
+    - Desired behavior: the typing indicator should remain active for as long as *any* `ensure_task`-scheduled work for that session is still in progress.
+    - Do not implement now; track for later.
+
 ## Entry Points
 
 - **Bub CLI**: `uv run bub chat`
