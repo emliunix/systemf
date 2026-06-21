@@ -38,12 +38,21 @@ prim_op tape_handoff :: Tape
   -> String -- ^ handoff name/reason
   -> ()
 
+-- | to get an inferior tape
+--   That's tape of name parent/tag
+prim_op inferior_tape :: String -- ^ tag
+  -> Tape -- ^ parent tape
+  -> Tape
+
 --| The special return type to indicate we use the LLM response
 --  as the return value and eliminate the need for a set_return call 
 data Reply = MkReply String
 
 un_reply :: Reply -> String = \r -> case r of
   MkReply s -> s
+
+-- TODO: implement include
+-- @include('./summarize.md')
 
 {-# LLM notools #-}
 -- | Your task is to summarize with the given instruction

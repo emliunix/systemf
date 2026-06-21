@@ -1,6 +1,6 @@
 # Project Status
 
-**Last Updated:** 2026-06-20
+**Last Updated:** 2026-06-21
 
 ## Conventions
 
@@ -52,15 +52,31 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
   - `append_message :: Tape -> String -> Role -> ()` — append message with type-safe role
   - `tape_handoff :: Tape -> String -> ()` — create handoff anchor
   - **Completed:** [`changes/54-tape-primitives-handoff-and-role.md`](changes/54-tape-primitives-handoff-and-role.md)
-- **#3 Bub gateway Telegram polling stall + lock cascade** `#bug`
+- **#34 Bub gateway Telegram polling stall + lock cascade** `#bug`
   - Fixed by wrapping `Bot.get_updates()` in `asyncio.wait_for(..., timeout=60.0)` (`bub/src/bub/channels/telegram.py`).
   - Secondary `ensure_task()` lock cascade fixed by wrapping the event iterator in `try/finally: out_q.shutdown()`.
   - **Change:** `bub/src/bub/channels/telegram.py`
-- **#4 Inflight steering messages not inserted at the right granularity** `#issue`
+- **#35 Inflight steering messages not inserted at the right granularity** `#issue`
   - Steering messages are now consumed between agent inner-loop turns via the steering queue.
 - **#24 Steering message** `#feature`
-  - Added ability to inject steering messages into conversation context mid-loop.
-  - **Change:** [`changes/59-steering-message-support.md`](changes/59-steering-message-support.md)
+  - Per-session steering queue (`asyncio.Queue[str]`) passed into the active agent loop and consumed between steps via `PreparedChat.additional_messages` (ephemeral, not persisted to tape).
+  - Session singleton (`TaskBase.ensure_task` + per-session `asyncio.Lock`) guarantees one agent loop per session; new messages during an active loop become steering instead of spawning competing loops.
+  - System F bridge: `bub.Steering` prim_type; `main :: String -> Steering -> LLM ()` receives `VPrim(session.queue)` (`bub_sf/src/bub_sf/hook.py:244`); `checked_run` declares a `Steering` arg picked up by `MatchLLMResult.steering_idx` and forwarded to `run_agent_with_repl[_and_stream]`.
+  - **Root-cause fix for inflight not working:** `main.sf` was not threading `Steering` into the LLM func (`checked_run`). Now passes `st` through.
+  - **Design:** [`changes/59-steering-message-support.md`](changes/59-steering-message-support.md)
+  - **Supersedes:** [`changes/56-per-session-message-serialization.md`](changes/56-per-session-message-serialization.md)
+- **#25 Document `fork_store.py` query behavior** `#documentation`
+  - Documented in [`docs/tape.md`](docs/tape.md): error-vs-silent-empty matrix, auto-creation rules, schema/views, `fork_tape` tool_call special case, anchor resolution, transaction model, read ordering.
+- **#36 Idle-triggered auto-compaction** `#feature` (channel-side done; compaction delegated to SF `main`)
+  - `IdleTracker` integrated into `TelegramChannel`: registered on first message (30-min timeout), `heartbeat()` resets via message lifespan, `_on_session_idle` emits the idle signal through the normal `_on_receive` pipeline (`bub/src/bub/channels/telegram.py:160,250-275,325-332`).
+  - **Design pivot from change 57:** the `kind="idle"` `MessageKind` / `BuiltinImpl` hook handling (steps 3-5) were dropped; the idle signal is now a regular content message (`<context type="idle_event">`), and compaction is delegated to the SF `main` program (`main.sf` `with_compact`). The actual compaction primitives are tracked as a separate gap (see todo #38).
+  - **Design:** [`changes/57-idle-triggered-auto-compaction.md`](changes/57-idle-triggered-auto-compaction.md)
+  - **Supersedes:** [`changes/51-auto-compact-session.md`](changes/51-auto-compact-session.md)
+- 30. **`,command` execution blocked by tape lock / agent session** `#issue`
+    - User-issued `,`-prefixed commands should execute **immediately** without waiting for the current agent loop to finish.
+    - Current behavior: commands queue up behind `ensure_task()` just like regular messages, because `run_model_stream()` takes the session lock and all inbound messages are funneled through the same serialization path.
+    - **Related:** #4 (steering granularity) — commands are a special case of steering that need bypass logic.
+    - dup of **28**
 
 ## Todo
 
@@ -106,41 +122,22 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
      - Uses per-session queue + `_ensure_agent()` worker pattern to maintain single-agent-per-session invariant
      - Works for all entry points (gateway, CLI, tests)
      - **Change:** [`changes/56-per-session-message-serialization.md`](changes/56-per-session-message-serialization.md)
-20. **Idle-triggered auto-compaction** `#feature`
-     - Channel-side `IdleTracker` sends `kind="idle"` messages through normal pipeline when session idle
-     - Hooks handle idle messages to trigger tape compaction (handoff/summary) based on threshold
-     - Works with any channel that integrates `IdleTracker`; not specific to any transport
-     - **Change:** [`changes/57-idle-triggered-auto-compaction.md`](changes/57-idle-triggered-auto-compaction.md)
-     - **Supersedes:** [`changes/51-auto-compact-session.md`](changes/51-auto-compact-session.md) — split into serialization (56) and idle compaction (57)
 21. **Implement `make_tape` primitive for SystemF programs** `#dogfooding`
-     - `make_tape :: Maybe Tape -> String -> Tape` — create new tape with optional parent
-     - **Change:** [`changes/39-make-tape-primitive.md`](changes/39-make-tape-primitive.md)
+    - `make_tape :: Maybe Tape -> String -> Tape` — create new tape with optional parent
+    - **Change:** [`changes/39-make-tape-primitive.md`](changes/39-make-tape-primitive.md)
 22. **Continue dogfooding: migrate additional skills to SystemF programs** `#dogfooding`
      - Migrate other bub tools and framework components to SystemF programs beyond tape primitives
-23. **sf-check bub missing** #bug
+23. **sf-check bub missing** `#bug`
      - sf-check doesn't include bub.sf to search paths by default.
      - the problem is BubExt requires TapeStore and BubFrameworkd for actually calling, though for check purpose it's not needed.
      - I'm not sure, maybe we can make search path a static field of Ext.
-24. **Steering message** `#feature`
-     - Add ability to inject steering messages into the conversation context to guide agent behavior dynamically
-     - **Change:** [`changes/59-steering-message-support.md`](changes/59-steering-message-support.md)
-     - Note: first message must be split from steering messages — the first message is the goal/topic-setting prompt, steering messages are course corrections mid-loop
-     - **Impl gap (2026-06-19):** Current impl feels like it appends messages to the end of the turn instead of consuming inflight. The agent loop (`agent.py`) drains the steering queue between steps via `get_prompts()`, but `ensure_task()` also chains a new `_run_agent_session` for each inbound message. If a steering message arrives after the last drain check but before loop exit, the chained task picks it up as a **new initial prompt** for a fresh session instead of mid-loop steering. Fix direction: after the loop finishes, decide if remaining queue messages warrant a new turn or should have been part of the current one.
 26. **SF tools feature: typed todo items** `#feature`
-     - Leverage SystemF's type system to give structure to the todo list itself
-     - Instead of free-form markdown todos, define typed todo items as SystemF data types (e.g., `data TodoStatus = Todo | InProgress | Done`, `data Todo = MkTodo Int String TodoStatus (Maybe String)`)
-     - Benefits: type-checked status transitions, typed metadata fields, REPL-queryable todo state, composable with tape/LLM primitives
-     - Enables: `todo_add`, `todo_update`, `todo_query` as typed prim_ops returning structured data instead of raw strings
-25. **Document `fork_store.py` query behavior** `#documentation`
-     - Document when query operations error vs silently return empty:
-       - `TapeQuery` with non-existent tape: silently returns empty results (tape_id = -1), does NOT error
-       - `after_anchor` / `after_last` / `between_anchors`: error when anchors not found
-       - `fork` with non-existent source tape or existing target: errors
-       - `rename` / `reset` on non-existent tape: errors
-       - `fork_tape` with no entries or tool_call without assistant entry: errors
-     - Document auto-creation behavior: `append` auto-creates tape via `_get_or_create_tape`, `create` is `INSERT OR IGNORE` (no-op if exists), but `fork`/`rename`/`reset` require explicit creation
-     - Add docstrings to `SQLiteForkTapeStore`, `CoreOps`, and `BuildQueryImpl` public methods
-26. **Inferior tape**, #feature, the tape that has a stable name derived from the parent tape.
+    - Leverage SystemF's type system to give structure to the todo list itself
+    - Instead of free-form markdown todos, define typed todo items as SystemF data types (e.g., `data TodoStatus = Todo | InProgress | Done`, `data Todo = MkTodo Int String TodoStatus (Maybe String)`)
+    - Benefits: type-checked status transitions, typed metadata fields, REPL-queryable todo state, composable with tape/LLM primitives
+    - Enables: `todo_add`, `todo_update`, `todo_query` as typed prim_ops returning structured data instead of raw strings
+37. **Inferior tape** `#feature`
+    - The tape that has a stable name derived from the parent tape.
 
 27. **Remove `LLM` type; move streaming marker to pragma** `#issue` `#design`
     - `LLM a` was overloaded to mean both "LLM-synthesized value" and "stream through the agent loop", making it uncomposable.
@@ -156,11 +153,6 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - **Exploration:** [`analysis/AGENT_SPLIT_EXPLORATION.md`](analysis/AGENT_SPLIT_EXPLORATION.md) — proposes `CommandProcessor` + `AgentLoop` + `TurnDispatcher` split.
     - **Refined proposal:** [`analysis/COMMAND_FUNCTIONS_EXTRACTION.md`](analysis/COMMAND_FUNCTIONS_EXTRACTION.md) — two probed functions `run_command` and `run_command_stream` returning `| None`, no class needed.
 
-30. **`,command` execution blocked by tape lock / agent session** `#issue`
-    - User-issued `,`-prefixed commands should execute **immediately** without waiting for the current agent loop to finish.
-    - Current behavior: commands queue up behind `ensure_task()` just like regular messages, because `run_model_stream()` takes the session lock and all inbound messages are funneled through the same serialization path.
-    - **Related:** #4 (steering granularity) — commands are a special case of steering that need bypass logic.
-
 31. **`summarize` prompt needs improvement** `#bug`
     - The `{-# LLM notools #-}` prim_op spawns a sub-agent, but the sub-agent still needs explicit instructions to output the summarization directly without attempting tool calls or `set_return`.
     - Current prompt steering is insufficient.
@@ -174,6 +166,13 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
 33. **Experiment seuqence LLM calls** `#feature`
     - It's often the case the workflow has steps, each has it's goal. Yet we'd like them to share a tape so it has accumulated global view, but with different focuses.
     - example: `do_a ; do_b ; do_c`, each with its own Prompt.
+    - realized it's just plain function calls, but maybe we can sequence `Maybe` as a good helper
+
+38. **Implement missing SF primitives for `main.sf` compaction path** `#bug` `#dogfooding`
+  - `main.sf` calls primitives that have no implementation, blocking the idle-compaction path wired in #36:
+    - `needs_compact :: Tape -> Bool` — used `main.sf:22`, **not declared or implemented anywhere**.
+    - `inferior_tape :: String -> Tape -> Tape` — declared `bub_sf/src/bub_sf/bub.sf:36`, used `main.sf:29`, but **no `_inferior_tape` impl and no `get_primop` case** in `bub_ext.py`.
+  - Add declarations to `bub.sf`, implementations to `BubOps` in `bub_ext.py`, and dispatch in `get_primop`.
 
 ## Entry Points
 

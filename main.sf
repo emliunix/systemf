@@ -9,6 +9,7 @@ data Intent
 {-# LLM #-}
 prim_op checked_run :: Tape -> Intent -- ^ intent
     -> String -- ^ user input
+    -> Steering
     -> LLM ()
 
 {-# LLM #-}
@@ -20,5 +21,17 @@ prim_op run :: Tape -> String -> Steering -> -> LLM ()
 prim_op user_intent :: Prompt String -- ^ the user input
     -> Intent -- ^ the guessed intent
 
+with_compact :: forall a. Tape -> (Tape -> a) -> a = \tape action ->
+    if needs_compact tape
+    then compact Nothing
+    else () ;
+    action tape
+
 main :: String -> Steering -> LLM () = \input st ->
-    run (current_tape ()) input st
+    let tape = current_tape ()
+        intent_tape = with_compact (inferior_tape "intent" tape) (\tape ->
+            let intent = user_intent (tape_fork tape (Just "for/intent")) input
+            in  tape_append tape Assistant ("user_input: " ++ input ++ "\nintent_record: " ++ intent))
+        intent = user_intent input 
+    in
+        checked_run tape intent input st
