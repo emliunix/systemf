@@ -186,6 +186,10 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
 40. **comment macros `@include`**, `#feature`
     - to make prompt in its own .md file and included into the comment in the .sf file.
 
+41. **Extract comment processing logic from lexer**, `#refactor`
+    - Strip comment processing (`process_comments` and related helpers) out of `lexer.py`.
+    - Make it either a standalone pass or parser logic, so the lexer/parser boundary stays clean.
+
 ## Entry Points
 
 - **Bub CLI**: `uv run bub chat`
