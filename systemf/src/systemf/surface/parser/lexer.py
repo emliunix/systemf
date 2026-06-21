@@ -66,7 +66,6 @@ from systemf.surface.parser.types import (
     LeftBraceToken,
     RightBraceToken,
     CommaToken,
-    SemicolonToken,
 )
 from systemf.utils.location import Location
 
@@ -141,7 +140,6 @@ class Lexer:
         ("LBRACE", r"\{"),
         ("RBRACE", r"\}"),
         ("COMMA", r","),
-        ("SEMICOLON", r";"),
         # Literals
         ("STRING", r'"([^"\\]|\\.)*"'),
         ("NUMBER", r"\d+"),
@@ -413,8 +411,6 @@ class Lexer:
             return RightBraceToken(delimiter=value, location=loc)
         elif token_type == "COMMA":
             return CommaToken(delimiter=value, location=loc)
-        elif token_type == "SEMICOLON":
-            return SemicolonToken(operator=value, location=loc)
         else:
             # Unknown token type - skip
             return None

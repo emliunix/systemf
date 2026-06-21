@@ -22,13 +22,14 @@ def mock_agent():
     agent.tapes.handoff = AsyncMock(return_value=[])
     agent.tapes.create = AsyncMock()
     agent.tapes.fork_tape = AsyncMock()
+    agent.tapes.info = AsyncMock()
     return agent
 
 
 class MockSession:
     """Mock REPLSessionProto with agent in state."""
     def __init__(self, agent):
-        self.state = {"_runtime_agent": agent}
+        self.state = {"bub_state": {"_runtime_agent": agent}}
     
     def fork(self):
         return MockSession(self.state.get("_runtime_agent"))
@@ -138,11 +139,15 @@ class TestTapeHandoff:
         
         val = await result.val
         assert val == bi.UNIT_VAL
-        mock_agent.tapes.handoff.assert_called_once_with(tape_name, name=handoff_name)
+        mock_agent.tapes.handoff.assert_called_once()
+        call_kwargs = mock_agent.tapes.handoff.call_args
+        assert call_kwargs[0][0] == tape_name
+        # impl appends a uuid suffix to keep handoff names unique
+        assert call_kwargs[1]["name"].startswith(f"{handoff_name}_")
 
 
 class TestMakeTape:
-    """Tests for _make_tape primitive."""
+    """Tests for _tape_make primitive."""
 
     @pytest.mark.asyncio
     async def test_make_tape_without_parent(self, bub_ops, mock_agent, mock_session):
@@ -152,7 +157,7 @@ class TestMakeTape:
             VLit(LitString("mytape")),
         ]
         
-        result = bub_ops._make_tape(args, mock_session)
+        result = bub_ops._tape_make(args, mock_session)
         assert isinstance(result, VAsync)
         
         val = await result.val
@@ -169,7 +174,7 @@ class TestMakeTape:
             VLit(LitString("child")),
         ]
         
-        result = bub_ops._make_tape(args, mock_session)
+        result = bub_ops._tape_make(args, mock_session)
         assert isinstance(result, VAsync)
         
         val = await result.val
@@ -180,7 +185,7 @@ class TestMakeTape:
 
 
 class TestForkTape:
-    """Tests for _fork_tape primitive."""
+    """Tests for _tape_fork primitive."""
 
     @pytest.mark.asyncio
     async def test_fork_tape_with_name(self, bub_ops, mock_agent, mock_session):
@@ -193,13 +198,14 @@ class TestForkTape:
             VData(1, [VLit(LitString(fork_name))]),  # Just fork_name
         ]
         
-        result = bub_ops._fork_tape(args, mock_session)
+        result = bub_ops._tape_fork(args, mock_session)
         assert isinstance(result, VAsync)
         
         val = await result.val
         assert isinstance(val, VPrim)
-        assert val.val == fork_name
-        mock_agent.tapes.fork_tape.assert_called_once_with(tape_name, fork_name)
+        # impl appends a uuid suffix to keep fork names unique
+        assert val.val.startswith(f"{fork_name}_")
+        mock_agent.tapes.fork_tape.assert_called_once_with(tape_name, val.val)
 
     @pytest.mark.asyncio
     async def test_fork_tape_with_nothing_generates_name(self, bub_ops, mock_agent, mock_session):
@@ -211,10 +217,87 @@ class TestForkTape:
             VData(0, []),  # Nothing
         ]
         
-        result = bub_ops._fork_tape(args, mock_session)
+        result = bub_ops._tape_fork(args, mock_session)
         assert isinstance(result, VAsync)
         
         val = await result.val
         assert isinstance(val, VPrim)
         assert val.val.startswith("source/fork_")
         mock_agent.tapes.fork_tape.assert_called_once()
+
+
+def _tape_info(*, entries_since_last_anchor: int = 0, anchors: int = 0):
+    """Build a TapeInfo-shaped mock for agent.tapes.info()."""
+    info = MagicMock()
+    info.entries_since_last_anchor = entries_since_last_anchor
+    info.anchors = anchors
+    return info
+
+
+class TestNeedsCompact:
+    """Tests for _needs_compact primitive."""
+
+    @pytest.mark.asyncio
+    async def test_returns_true_above_threshold(self, bub_ops, mock_agent, mock_session):
+        """needs_compact returns TRUE when entries since last anchor exceed threshold."""
+        from bub_sf.bub_ext import COMPACT_THRESHOLD_ENTRIES
+
+        mock_agent.tapes.info = AsyncMock(
+            return_value=_tape_info(entries_since_last_anchor=COMPACT_THRESHOLD_ENTRIES + 1)
+        )
+        args = [VPrim("some-tape")]
+
+        result = bub_ops._needs_compact(args, mock_session)
+        assert isinstance(result, VAsync)
+
+        val = await result.val
+        assert val == bi.TRUE_VAL
+        mock_agent.tapes.info.assert_called_once_with("some-tape")
+
+    @pytest.mark.asyncio
+    async def test_returns_false_at_or_below_threshold(self, bub_ops, mock_agent, mock_session):
+        """needs_compact returns FALSE when entries since last anchor are within threshold."""
+        from bub_sf.bub_ext import COMPACT_THRESHOLD_ENTRIES
+
+        mock_agent.tapes.info = AsyncMock(
+            return_value=_tape_info(entries_since_last_anchor=COMPACT_THRESHOLD_ENTRIES)
+        )
+        args = [VPrim("some-tape")]
+
+        val = await bub_ops._needs_compact(args, mock_session).val
+        assert val == bi.FALSE_VAL
+
+
+class TestInferiorTape:
+    """Tests for _inferior_tape primitive."""
+
+    @pytest.mark.asyncio
+    async def test_creates_when_missing(self, bub_ops, mock_agent, mock_session):
+        """inferior_tape creates the named child when it does not exist (no anchors)."""
+        mock_agent.tapes.info = AsyncMock(return_value=_tape_info(anchors=0))
+        args = [
+            VLit(LitString("intent")),
+            VPrim("session/main"),
+        ]
+
+        result = bub_ops._inferior_tape(args, mock_session)
+        assert isinstance(result, VAsync)
+
+        val = await result.val
+        assert isinstance(val, VPrim)
+        assert val.val == "session/main/intent"
+        mock_agent.tapes.create.assert_called_once_with("session/main/intent")
+
+    @pytest.mark.asyncio
+    async def test_idempotent_when_exists(self, bub_ops, mock_agent, mock_session):
+        """inferior_tape does not create when the tape already exists (has bootstrap anchor)."""
+        mock_agent.tapes.info = AsyncMock(return_value=_tape_info(anchors=1))
+        args = [
+            VLit(LitString("intent")),
+            VPrim("session/main"),
+        ]
+
+        val = await bub_ops._inferior_tape(args, mock_session).val
+        assert isinstance(val, VPrim)
+        assert val.val == "session/main/intent"
+        mock_agent.tapes.create.assert_not_called()

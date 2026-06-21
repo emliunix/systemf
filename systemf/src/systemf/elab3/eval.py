@@ -97,7 +97,7 @@ class BackpatchNext(Cont):
 class EvalCtx(Protocol):
     """Protocol for the context that resolves module-level names at runtime."""
 
-    async def lookup_val(self, name: Name) -> Val: ...
+    async def lookup_gbl(self, name: Name) -> Val: ...
     @property
     def core_extra(self) -> CoreBuilderExtra: ...
     def get_session(self) -> REPLSessionProto | None: ...
@@ -184,7 +184,7 @@ class Evaluator:
                         case _:
                             return await self.call_continue(raw, k)
                 else:
-                    return await self.call_continue(await self.ctx.lookup_val(id.name), k)
+                    return await self.call_continue(await self.ctx.lookup_gbl(id.name), k)
 
             case CoreLam(param=param, body=body):
                 return await self.call_continue(VClosure(env, param, body), k)

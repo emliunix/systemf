@@ -17,13 +17,6 @@ prim_op tape_make :: Maybe Tape -- ^ optional parent tape
   -> String -- ^ name for the new tape
   -> Tape
 
--- | get the inferior tape with a stable name derived from the parent tape
-prim_op inferior_tape :: Tape -- ^ the parent tape
-  -> String -- ^ the name for the inferior tape
-  -> Tape
-
-prim_op run_tape_with_autocompaction :: forall a. Tape -> (Tape -> a) -> a
-
 -- | Message role for tape entries
 data Role = User | Assistant
 
@@ -38,8 +31,11 @@ prim_op tape_handoff :: Tape
   -> String -- ^ handoff name/reason
   -> ()
 
--- | to get an inferior tape
---   That's tape of name parent/tag
+-- | Check whether the tape has grown enough since the last anchor to warrant compaction.
+prim_op needs_compact :: Tape -> Bool
+
+-- | Get-or-create an inferior (named child) tape: name is {parent}/{tag}.
+--   Idempotent — returns the existing tape if it already exists.
 prim_op inferior_tape :: String -- ^ tag
   -> Tape -- ^ parent tape
   -> Tape
@@ -50,9 +46,6 @@ data Reply = MkReply String
 
 un_reply :: Reply -> String = \r -> case r of
   MkReply s -> s
-
--- TODO: implement include
--- @include('./summarize.md')
 
 {-# LLM notools #-}
 -- | Your task is to summarize with the given instruction
@@ -65,11 +58,9 @@ prim_op summarize :: Tape -> String -- ^ the instruction for the summarization
 data Prompt a = MkPrompt a
 
 compact :: Maybe String -> () = \msg ->
-    tape_compact (current_tape ()) msg
-
-tape_compact :: Tape -> Maybe String -> () = \tape msg ->
-    let instr = "summarize all the discussions so far\n" ++ (fromMaybe "" msg)
+    let tape = current_tape ()
+        instr = "summarize all the discussions so far\n" ++ (fromMaybe "" msg)
         summary = un_reply (summarize (tape_fork tape (Just "for/summarize")) instr)
     in
-        tape_handoff tape "compaction" ;
-        tape_append tape Assistant summary
+        -- hand crafted id monad to sequence the ops
+        (\_unit -> tape_append tape Assistant summary) (tape_handoff tape "compaction")

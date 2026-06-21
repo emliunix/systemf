@@ -71,7 +71,6 @@ from systemf.surface.parser.types import (
     PlusToken,
     RightBracketToken,
     RightParenToken,
-    SemicolonToken,
     SlashToken,
     StarToken,
     StringToken,
@@ -188,9 +187,6 @@ APPEND = match_token(AppendToken)  # ++
 
 # Cons operator
 COLON = match_token(ColonToken)  # :
-
-# Sequence operator
-SEMICOLON = match_token(SemicolonToken)  # ;
 
 
 # =============================================================================
@@ -712,44 +708,6 @@ def logical_or_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     return parser
 
 
-def seq_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
-    """Parse sequence expressions: left ; right (left-associative).
-
-    Lowest precedence operator. Useful for C-style sequencing where
-    expressions on subsequent lines are aligned at the same column.
-
-    Args:
-        constraint: Layout constraint (passed through to operands)
-
-    Returns:
-        SurfaceOp tree for sequence operations or a single term
-    """
-
-    @generate
-    def parser():
-        # Parse left operand (logical OR level)
-        left = yield logical_or_parser(constraint)
-        loc = left.location
-
-        # Parse zero or more ; right-operand pairs
-        ops_and_rights = []
-        while True:
-            op = yield SEMICOLON.optional()
-            if op is None:
-                break
-            right = yield logical_or_parser(constraint)
-            ops_and_rights.append((op, right))
-
-        # Build left-associative tree
-        result = left
-        for op, right in ops_and_rights:
-            result = SurfaceOp(left=result, op=op.value, right=right, location=loc)
-
-        return result
-
-    return parser
-
-
 def op_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     """Parse operator expressions with proper precedence.
 
@@ -762,7 +720,7 @@ def op_parser(constraint: ValidIndent) -> P[SurfaceTerm]:
     Returns:
         SurfaceTerm possibly wrapped in SurfaceOp nodes
     """
-    return seq_parser(constraint)
+    return logical_or_parser(constraint)
 
 
 # =============================================================================

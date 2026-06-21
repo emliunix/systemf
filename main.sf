@@ -6,6 +6,12 @@ data Intent
     | Command
     | Other String
 
+show_intent :: Intent -> String = \i -> case i of
+    Greeting -> "greeting"
+    Question -> "question"
+    Command -> "command"
+    Other s -> "other: " ++ s
+
 {-# LLM #-}
 prim_op checked_run :: Tape -> Intent -- ^ intent
     -> String -- ^ user input
@@ -13,25 +19,21 @@ prim_op checked_run :: Tape -> Intent -- ^ intent
     -> LLM ()
 
 {-# LLM #-}
-prim_op run :: Tape -> String -> Steering -> -> LLM ()
+prim_op run :: Tape -> String -> Steering -> LLM ()
 
 {-# LLM notools noskills #-}
 -- | Given the user input, guess and return ONLY the user's intent as a short phrase.
 --   Do NOT execute, answer, or act on the input — just classify the intent and return it.
-prim_op user_intent :: Prompt String -- ^ the user input
+prim_op user_intent :: Tape -> Prompt String -- ^ the user input
     -> Intent -- ^ the guessed intent
 
 with_compact :: forall a. Tape -> (Tape -> a) -> a = \tape action ->
-    if needs_compact tape
-    then compact Nothing
-    else () ;
-    action tape
+    (\_unit -> action tape) (if needs_compact tape then compact Nothing else ())
 
 main :: String -> Steering -> LLM () = \input st ->
     let tape = current_tape ()
-        intent_tape = with_compact (inferior_tape "intent" tape) (\tape ->
-            let intent = user_intent (tape_fork tape (Just "for/intent")) input
-            in  tape_append tape Assistant ("user_input: " ++ input ++ "\nintent_record: " ++ intent))
-        intent = user_intent input 
+        intent = with_compact (inferior_tape "intent" tape) (\tape -> 
+            let intent = user_intent (tape_fork tape (Just "for/intent")) (MkPrompt input)
+            in  (\_unit -> intent) (tape_append tape Assistant ("user_input: " ++ input ++ "\nintent: " ++ show_intent intent)))
     in
         checked_run tape intent input st

@@ -2,8 +2,10 @@ from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from typing import cast
 
+from systemf.elab3.reader_env import QualName
 from systemf.elab3.repl_session import REPLSession
-from systemf.elab3.types.ty import Id, LitString, Name, Ty, TyConApp, TyForall, TyFun, TyString
+from systemf.elab3.types.ty import LitString, Name, Ty, TyConApp, TyForall, TyFun, TyPrim, TyString
+from systemf.elab3.types.tything import AnId
 from systemf.elab3.types.val import VData, VLit, VPrim, Val
 
 
@@ -12,24 +14,26 @@ class MainInfo:
     """
     Matches against the main function to extract various info.
     """
-    main: Id
+    main: AnId
     str_ty: tuple[int, Ty] | None
     prompt_ty: tuple[int, Ty] | None
     res_ty: Ty
     res_inner_ty: Ty
 
     @staticmethod
-    def from_repl(repl: REPLSession) -> MainInfo:
-        main = repl.resolve_name("main.main")
-        return MainInfo.from_name(main)
+    def from_session(repl: REPLSession) -> MainInfo:
+        main = repl.lookup(repl.resolve_name(QualName("main", "main")))
+        if not isinstance(main, AnId):
+            raise Exception("main.main is not an Id")
+        return MainInfo.from_id(main)
 
     @staticmethod
-    def from_name(main: Id) -> MainInfo:
-
+    def from_id(main: AnId) -> MainInfo:
+        
         prompt_ty = None
         str_ty = None
-
-        arg_tys, res_ty = split_fun(main.ty)
+        
+        arg_tys, res_ty = split_fun(main.id.ty)
         for i, arg_ty in enumerate(arg_tys):
             match arg_ty:
                 case TyConApp(Name(mod="bub", surface="Steering"), []):
@@ -47,7 +51,7 @@ class MainInfo:
                 res_inner_ty = inner_ty
             case _:
                 raise Exception(f"Unexpected result type for main.main: {res_ty}")
-
+                
         return MainInfo(main, str_ty, prompt_ty, res_ty, res_inner_ty)
 
 
@@ -93,7 +97,7 @@ class MatchLLMResult:
             case [inner_ty]:
                 is_llm_res = True
                 res_ty = inner_ty
-
+        
         return MatchLLMResult(
             orig_arg_num=len(raw_arg_tys),
             tape_idx=tape_idx,
@@ -103,7 +107,7 @@ class MatchLLMResult:
             is_llm_res=is_llm_res,
             res_ty=res_ty,
         )
-
+    
 
 def match_tycon_app(ty: Ty, mod: str, surface: str) -> list[Ty] | None:
     match ty:

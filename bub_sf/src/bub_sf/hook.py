@@ -26,7 +26,7 @@ from republic.core.results import AsyncStreamEvents, LLMResult, StreamEvent
 from republic.tape.store import AsyncTapeStore
 from systemf.elab3.repl import REPL
 from systemf.elab3.repl_driver import REPLDriver
-from systemf.elab3.repl_session import REPLSession, mk_funcall
+from systemf.elab3.repl_session import REPLSession, fun_call_tm
 from systemf.elab3.types.ast import ImportDecl
 from systemf.elab3.types.protocols import Ext
 from systemf.elab3.types.ty import LitString
@@ -231,10 +231,9 @@ class SFHookImpl:
     async def _run_agent_session(self, session: SessionInfo, state: State, out_q: asyncio.Queue[StreamEvent[LLMResult]]) -> None:
         if session.queue.empty():
             return
-        repl = session.repl
-        repl.state["bub_state"] = state
+        session.repl.state["bub_state"] = state
         # eval: main prompt
-        info = MainInfo.from_repl(repl)
+        info = MainInfo.from_session(session.repl)
         str_val = None
         q_val = None
         vals: list[tuple[int, Val]] = []
@@ -246,14 +245,12 @@ class SFHookImpl:
             case (i, _):
                 vals.append((i, VPrim(session.queue)))
         vals_ = [val for _, val in sorted(vals)]
-        res = await repl.unsafe_eval(mk_funcall(info.main, vals_))
+        res = await session.repl.unsafe_eval(fun_call_tm(info.main.id, vals_))
         match res:
             case VPrim([AsyncStreamEvents() as events, _]):
-                try:
-                    async for event in events:
-                        await out_q.put(event)
-                finally:
-                    out_q.shutdown()
+                async for event in events:
+                    await out_q.put(event)
+                out_q.shutdown()
             case _:
                 raise Exception(f"Expected AsyncStreamEvents from main.main, got {res}")
 

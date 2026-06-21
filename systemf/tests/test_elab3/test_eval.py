@@ -178,7 +178,7 @@ class FakeCtx(EvalCtx, TyLookup):
         return self._core_extra
 
     @override
-    async def lookup_val(self, name: Name) -> Val:
+    async def lookup_gbl(self, name: Name) -> Val:
         return self.mod_insts[name.mod][name]
     
     @override
@@ -437,8 +437,8 @@ async def test_eval_mod_nonrec():
         [(a.name, AnId.create(a)), (b.name, AnId.create(b))],
         bindings
     ))
-    assert await ctx.lookup_val(a.name) == VLit(LitInt(1))
-    assert await ctx.lookup_val(b.name) == VLit(LitInt(2))
+    assert await ctx.lookup_gbl(a.name) == VLit(LitInt(1))
+    assert await ctx.lookup_gbl(b.name) == VLit(LitInt(2))
 
 
 async def test_eval_mod_rec_single_guarded():
@@ -448,7 +448,7 @@ async def test_eval_mod_rec_single_guarded():
     bindings: list[Binding] = [Rec([(f, lam)])]
     ctx = await FakeCtx.create()
     await ctx.add_mod(Module.create("M", [(f.name, AnId.create(f))], bindings))
-    result = await ctx.lookup_val(f.name)
+    result = await ctx.lookup_gbl(f.name)
     assert isinstance(result, VClosure)
 
 
@@ -465,15 +465,15 @@ async def test_eval_mod_rec_multi_mutual():
         [(f.name, AnId.create(f)), (g.name, AnId.create(g))],
         bindings,
     ))
-    assert isinstance(await ctx.lookup_val(f.name), VClosure)
-    assert isinstance(await ctx.lookup_val(g.name), VClosure)
+    assert isinstance(await ctx.lookup_gbl(f.name), VClosure)
+    assert isinstance(await ctx.lookup_gbl(g.name), VClosure)
 
 
 async def test_eval_mod_raises_on_missing_module():
     """Lookup on an unknown module raises."""
     ctx = await FakeCtx.create()
     with pytest.raises(KeyError):
-        await ctx.lookup_val(_name("M", "foo", BUILTIN_ENDS + 99))
+        await ctx.lookup_gbl(_name("M", "foo", BUILTIN_ENDS + 99))
 
 
 async def test_eval_mod_cyclic_raises():
@@ -572,7 +572,7 @@ async def test_eval_mod_primary_api():
         [(n, AnId.create(Id(n, TyInt())))],
         bindings,
     ))
-    result = await ctx.lookup_val(n)
+    result = await ctx.lookup_gbl(n)
     assert isinstance(result, VLit)
     assert result.lit.value == 42
 
@@ -598,7 +598,7 @@ async def test_cross_module_reference():
         [(b_name, AnId.create(Id(b_name, TyInt())))],
         bindings_b,
     ))
-    result = await ctx.lookup_val(b_name)
+    result = await ctx.lookup_gbl(b_name)
     assert isinstance(result, VLit)
     assert result.lit.value == 100
 
@@ -647,7 +647,7 @@ async def test_multi_rec_unguarded_mutual_reference_raises():
 async def test_primops_are_vpartial():
     """Primitive operations should resolve to VPartial."""
     ctx = await FakeCtx.create()
-    result = await ctx.lookup_val(BUILTIN_INT_PLUS)
+    result = await ctx.lookup_gbl(BUILTIN_INT_PLUS)
     assert isinstance(result, VPartial)
     assert result.name == "int_plus"
     assert result.arity == 2

@@ -1,0 +1,101 @@
+-- test.sf
+-- Typecheck-level test programs exercising the bub tape primitives.
+-- Every primitive is used with its declared type; the compositions mirror
+-- the patterns main.sf relies on (inferior-tape tracking + auto-compaction).
+--
+-- Run:
+--     uv run bub sf-check test -L .
+-- (sf-check only elaborates + typechecks; it does not evaluate.)
+
+import bub
+
+-- ============================================================================
+-- current_tape / tape_fork
+-- ============================================================================
+
+fork_named :: () -> Tape
+fork_named = \_ -> tape_fork (current_tape ()) (Just "test/fork")
+
+fork_anon :: () -> Tape
+fork_anon = \_ -> tape_fork (current_tape ()) Nothing
+
+-- ============================================================================
+-- tape_make  :: Maybe Tape -> String -> Tape
+-- ============================================================================
+
+make_root :: () -> Tape
+make_root = \_ -> tape_make Nothing "root"
+
+make_child :: Tape -> Tape
+make_child = \parent -> tape_make (Just parent) "child"
+
+-- ============================================================================
+-- tape_append :: Tape -> Role -> String -> ()
+-- ============================================================================
+
+append_user :: Tape -> String -> ()
+append_user = \tape msg -> tape_append tape User msg
+
+append_assistant :: Tape -> String -> ()
+append_assistant = \tape msg -> tape_append tape Assistant msg
+
+-- ============================================================================
+-- tape_handoff :: Tape -> String -> ()
+-- ============================================================================
+
+handoff_test :: Tape -> ()
+handoff_test = \tape -> tape_handoff tape "test/handoff"
+
+-- ============================================================================
+-- needs_compact :: Tape -> Bool
+-- ============================================================================
+
+check_compact :: Tape -> Bool
+check_compact = \tape -> needs_compact tape
+
+-- guard a side-effecting action behind the compaction check
+guard_compact :: Tape -> () -> ()
+guard_compact = \tape _ ->
+    if needs_compact tape
+    then tape_handoff tape "test/auto-compact"
+    else ()
+
+-- ============================================================================
+-- inferior_tape :: String -> Tape -> Tape
+-- ============================================================================
+
+intent_tape :: Tape -> Tape
+intent_tape = \parent -> inferior_tape "intent" parent
+
+-- ============================================================================
+-- Composition: the with_compact combinator (mirrors main.sf)
+-- Sequencing uses the lambda-application idiom from `compact` in bub.sf:
+--   (\_unit -> effect2) effect1
+-- ============================================================================
+
+with_compact :: forall a. Tape -> (Tape -> a) -> a
+with_compact = \tape action ->
+    (\_unit -> action tape)
+    (if needs_compact tape then compact Nothing else ())
+
+-- ============================================================================
+-- Composition: intent-classification sub-pattern (mirrors main.sf)
+--   auto-compact the tracking tape when it grows, then append a record.
+-- ============================================================================
+
+record_intent :: Tape -> String -> ()
+record_intent = \tape note ->
+    with_compact tape (\t ->
+        tape_append t Assistant ("intent_record: " ++ note))
+
+-- ============================================================================
+-- End-to-end wiring: build a small pipeline out of the primitives above.
+-- (Typechecks here; at runtime it would need a live agent session, since
+--  every prim_op resolves through BubOps.)
+-- ============================================================================
+
+run_pipeline :: () -> ()
+run_pipeline = \_ ->
+    let main_tape = current_tape ()
+        tracking  = intent_tape main_tape
+    in  record_intent tracking "classify user intent"

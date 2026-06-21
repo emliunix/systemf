@@ -1,17 +1,11 @@
-"""
-Primitive types layout:
-
-- Steering: asyncio.Queue[Prompt]
-- Tape: str
-- LLM a: [AsyncStreamEvents[TurnResult], Val]
-
-"""
+from ast import arg
 import asyncio
 import uuid
 
 from pathlib import Path
 from typing import Any, TypedDict, Unpack, cast, overload, override
-from collections.abc import AsyncIterator, Generator
+from collections.abc import AsyncIterator, Callable, Generator
+from dataclasses import dataclass
 
 from loguru import logger
 from bub.builtin.agent import Agent
@@ -22,14 +16,18 @@ from republic.core.results import AsyncStreamEvents, FinalEvent, Finished, Promp
 
 from bub_sf.store.fork_store import SQLiteForkTapeStore
 from republic.tape.entries import TapeEntry
+from republic.tape.manager import AsyncTapeManager
 from systemf.elab3 import builtins as bi
-from systemf.elab3.repl_session import mk_funcall_by_name, mk_funcall_unsafe_fun
 from systemf.elab3.val_pp import pp_val
 from systemf.elab3.types.protocols import Ext, REPLSessionProto, Synthesizer
-from systemf.elab3.types.ty import LitString, Name, Ty, TyConApp, TyString
+from systemf.elab3.types.ty import LitString, Name, Ty, TyConApp, TyForall, TyFun, TyString
 from systemf.elab3.types.tything import AnId
 from systemf.elab3.types.val import VAsync, VData, VLit, VPrim, Val
 from systemf.elab3.types.vpartial import VPartial, SessionAwareFinish
+
+
+# Compact when entries accumulated since the last anchor exceed this threshold.
+COMPACT_THRESHOLD_ENTRIES = 40
 
 
 class BubExt(Ext):
@@ -57,93 +55,84 @@ class BubExt(Ext):
         ]
 
 
-def _current_tape(args: list[Val], session: REPLSessionProto | None) -> Val:
-    if session is None:
-        raise Exception("current_tape must be called with a valid session")
-    return VPrim(get_tape_name(session.state["bub_state"]))
-
-
-def _tape_fork(args: list[Val], session: REPLSessionProto | None) -> Val:
-    agent = _get_agent(session)
-    tape_name, fork_name = prim_val(args[0]), maybe_val(str_val, args[1])
-    fork_name = fork_name or f"{tape_name}/fork"
-    fork_name = f"{fork_name}_{uuid.uuid4().hex[:8]}"
-    async def _go():
-        await agent.tapes.fork_tape(tape_name, fork_name)
-        return VPrim(fork_name)
-    return VAsync(_go())
-
-
-def _tape_make(args: list[Val], session: REPLSessionProto | None) -> Val:
-    agent = _get_agent(session)
-    parent_tape, name = maybe_val(prim_val, args[0]), maybe_val(str_val, args[1])
-    suffix = uuid.uuid4().hex[:8]
-    if parent_tape is not None:
-        tape_name = f"{parent_tape}/{name}-{suffix}"
-    else:
-        tape_name = f"{name}-{suffix}"
-    async def _go():
-        await agent.tapes.create(tape_name)
-        return VPrim(tape_name)
-    return VAsync(_go())
-
-
-def _inferior_tape(args: list[Val], session: REPLSessionProto | None) -> Val:
-    agent = _get_agent(session)
-    parent_tape = prim_val(args[0])
-    name = maybe_val(str_val, args[1])
-    tape_name = f"{parent_tape}/{name}"
-    async def _go():
-        await agent.tapes.create(tape_name)
-        return VPrim(tape_name)
-    return VAsync(_go())
-
-
-def _tape_append(args: list[Val], session: REPLSessionProto | None) -> Val:
-    agent = _get_agent(session)
-    tape_name = prim_val(args[0])
-    role = ["user", "assistant"][cast(VData, args[1]).tag]
-    content = str_val(args[2])
-    message = {"role": role, "content": content}
-    if role == "assistant":
-        message["reasoning_content"] = ""
-    entry = TapeEntry.message(message)
-    async def _go():
-        await agent.tapes.append_entry(tape_name, entry)
-        return bi.UNIT_VAL
-    return VAsync(_go())
-
-
-def _tape_handoff(args: list[Val], session: REPLSessionProto | None) -> Val:
-    agent = _get_agent(session)
-    tape_name = prim_val(args[0])
-    name = f"{maybe_val(str_val, args[1])}_{uuid.uuid4().hex[:8]}"
-    async def _go():
-        # TODO: add the summary parameter
-        await agent.tapes.handoff(tape_name, name=name)
-        return bi.UNIT_VAL
-    return VAsync(_go())
-
-
-def _run_tape_with_autocompaction(args: list[Val], session: REPLSessionProto | None) -> Val:
-    if session is None:
-        raise Exception("run_tape_with_autocompaction must be called with a valid session")
-    agent = _get_agent(session)
-    tape_name: str = prim_val(args[0])
-    func = args[1]
-    async def _go():
-        info = await agent.tapes.info(tape_name)
-        if info.entries_since_last_anchor > 20:
-            await session.unsafe_eval(mk_funcall_by_name("bub.tape_compact", [VPrim(tape_name), bi.NOTHING_VAL], session))
-        return await session.unsafe_eval(mk_funcall_unsafe_fun(func, [VPrim(tape_name)]))
-    return VAsync(_go())
-
-
 class BubOps(Synthesizer):
     framework: BubFramework
     
     def __init__(self, framework: BubFramework) -> None:
         self.framework = framework
+
+    def _current_tape(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        if session is None:
+            raise Exception("current_tape must be called with a valid session")
+        return VPrim(get_tape_name(session.state["bub_state"]))
+
+    def _tape_fork(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
+        tape_name, fork_name = prim_val(args[0]), maybe_val(str_val, args[1])
+        fork_name = fork_name or f"{tape_name}/fork"
+        fork_name = f"{fork_name}_{uuid.uuid4().hex[:8]}"
+        async def _go():
+            await agent.tapes.fork_tape(tape_name, fork_name)
+            return VPrim(fork_name)
+        return VAsync(_go())
+
+    def _tape_make(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
+        parent_tape, name = maybe_val(prim_val, args[0]), str_val(args[1])
+        suffix = uuid.uuid4().hex[:8]
+        if parent_tape is not None:
+            tape_name = f"{parent_tape}/{name}-{suffix}"
+        else:
+            tape_name = f"{name}-{suffix}"
+        async def _go():
+            await agent.tapes.create(tape_name)
+            return VPrim(tape_name)
+        return VAsync(_go())
+
+    def _tape_append(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
+        tape_name = prim_val(args[0])
+        role_tag = _role_val(args[1])
+        content = str_val(args[2])
+        message = {"role": role_tag, "content": content}
+        if role_tag == "assistant":
+            message["reasoning_content"] = ""
+        entry = TapeEntry.message(message)
+        async def _go():
+            await agent.tapes.append_entry(tape_name, entry)
+            return bi.UNIT_VAL
+        return VAsync(_go())
+
+    def _tape_handoff(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
+        tape_name = prim_val(args[0])
+        name = f"{str_val(args[1])}_{uuid.uuid4().hex[:8]}"
+        async def _go():
+            # TODO: add the summary parameter
+            await agent.tapes.handoff(tape_name, name=name)
+            return bi.UNIT_VAL
+        return VAsync(_go())
+
+    def _needs_compact(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
+        tape_name = prim_val(args[0])
+        async def _go():
+            info = await agent.tapes.info(tape_name)
+            return bi.TRUE_VAL if info.entries_since_last_anchor > COMPACT_THRESHOLD_ENTRIES else bi.FALSE_VAL
+        return VAsync(_go())
+
+    def _inferior_tape(self, args: list[Val], session: REPLSessionProto | None) -> Val:
+        agent = _get_agent(session)
+        tag = str_val(args[0])
+        parent_tape = prim_val(args[1])
+        tape_name = f"{parent_tape}/{tag}"
+        async def _go():
+            # get-or-create: a non-existent tape has no bootstrap anchor
+            info = await agent.tapes.info(tape_name)
+            if info.anchors == 0:
+                await agent.tapes.create(tape_name)
+            return VPrim(tape_name)
+        return VAsync(_go())
 
     # TODO: we should refine session to TyLookup, cause get_primop is called on loading,
     # the session might be different from that of evaluting the op. so we need to restrcit
@@ -154,19 +143,19 @@ class BubOps(Synthesizer):
 
         match name.surface:
             case "current_tape":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_current_tape))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._current_tape))
             case "tape_fork":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_tape_fork))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_fork))
             case "tape_make":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_tape_make))
-            case "inferior_tape":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_inferior_tape))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_make))
             case "tape_append":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_tape_append))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_append))
             case "tape_handoff":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_tape_handoff))
-            case "run_tape_with_autocompaction":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(_run_tape_with_autocompaction))
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_handoff))
+            case "needs_compact":
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._needs_compact))
+            case "inferior_tape":
+                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._inferior_tape))
             case _:
                 return None
 

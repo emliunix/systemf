@@ -55,7 +55,6 @@ class REPLSessionProto(TyLookup, Protocol):
     async def unsafe_eval(self, input: CoreTm, envs: PMap[int, Val] | None = None) -> Val:
         """The untyped variant of eval"""
         ...
-    def resolve_name(self, name: str) -> Id: ...
 
 
 class NameGenerator(Protocol):
