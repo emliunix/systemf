@@ -1,6 +1,6 @@
 # Project Status
 
-**Last Updated:** 2026-06-21
+**Last Updated:** 2026-06-24
 
 ## Conventions
 
@@ -53,8 +53,9 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
   - `tape_handoff :: Tape -> String -> ()` — create handoff anchor
   - **Completed:** [`changes/54-tape-primitives-handoff-and-role.md`](changes/54-tape-primitives-handoff-and-role.md)
 - **#34 Bub gateway Telegram polling stall + lock cascade** `#bug`
-  - Fixed by wrapping `Bot.get_updates()` in `asyncio.wait_for(..., timeout=60.0)` (`bub/src/bub/channels/telegram.py`).
+  - Partial fix: wrapped `Bot.get_updates()` in `asyncio.wait_for(..., timeout=60.0)` (`bub/src/bub/channels/telegram.py`).
   - Secondary `ensure_task()` lock cascade fixed by wrapping the event iterator in `try/finally: out_q.shutdown()`.
+  - **2026-06-24 recurrence:** the 60s watchdog did not prevent a CLOSE-WAIT proxy stall (task #10). The timeout path was never logged, suggesting the polling task exited silently or `get_updates` was stuck in a non-yielding state.
   - **Change:** `bub/src/bub/channels/telegram.py`
 - **#35 Inflight steering messages not inserted at the right granularity** `#issue`
   - Steering messages are now consumed between agent inner-loop turns via the steering queue.
@@ -195,6 +196,13 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - However, its lifespan is currently tied to a single `_run_agent_session` task. When a SystemF program sequences multiple LLM calls via `ensure_task` (e.g., intent classification followed by `checked_run`/`run`), the first task's completion exits the lifespan and stops the typing indicator while later tasks are still running.
     - Desired behavior: the typing indicator should remain active for as long as *any* `ensure_task`-scheduled work for that session is still in progress.
     - Do not implement now; track for later.
+
+43. **Telegram `get_updates` watchdog failed on 2026-06-24 CLOSE-WAIT stall** `#bug`
+    - The 60s `asyncio.wait_for` wrapper around `Bot.get_updates()` did not prevent a half-dead proxy connection from halting polling for ~1.5 days.
+    - Logs contain no watchdog timeout warnings, so the wrapper's deadline path was never reached.
+    - Likely causes: polling task exited silently, or `get_updates` was stuck in a non-yielding state that blocked the event-loop timer.
+    - Next step: add a higher-level liveness monitor (last poll timestamp + hard restart of Telegram updater after N minutes of no activity) and extra wrapper/polling-task diagnostics.
+    - Tracked as task #10 in #bub-workspace.
 
 ## Entry Points
 
