@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Coroutine
 import asyncio
+import threading
 
 from pathlib import Path
 from typing import Any
@@ -188,7 +189,28 @@ class SFHookImpl:
         self.fork_store = store
 
     async def _get_fork_store(self) -> SQLiteForkTapeStore:
-        return  await SQLiteForkTapeStore.create_store(Path("./tape_store.db"))
+        """Create the SQLite fork store with a daemon-style aiosqlite worker thread.
+
+        aiosqlite's background connection worker is a non-daemon thread. When a
+        command like `bub sf-check --help` exits before the command body runs,
+        the normal `framework.shutdown()` cleanup path is skipped and Python
+        waits forever in `threading._shutdown` for the worker to finish. By
+        temporarily forcing newly spawned threads to be daemons during store
+        creation, the worker thread no longer blocks process exit, while the
+        regular `shutdown()` hook still closes the store cleanly during normal
+        operation.
+        """
+        original_start = threading.Thread.start
+
+        def _daemon_start(self: threading.Thread) -> None:
+            self.daemon = True
+            return original_start(self)
+
+        threading.Thread.start = _daemon_start  # type: ignore[assignment]
+        try:
+            return await SQLiteForkTapeStore.create_store(Path("./tape_store.db"))
+        finally:
+            threading.Thread.start = original_start  # type: ignore[assignment]
 
     def get_or_create(self, session_id: str) -> SessionInfo:
         if session_id not in self._sessions:
