@@ -95,6 +95,12 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - Current behavior: commands queue up behind `ensure_task()` just like regular messages, because `run_model_stream()` takes the session lock and all inbound messages are funneled through the same serialization path.
     - **Related:** #4 (steering granularity) — commands are a special case of steering that need bypass logic.
     - dup of **28**
+- **#39 `bub sf-check --help` hangs / requires terminal input** `#bug`
+  - Fixed by forcing aiosqlite's worker thread to daemon during `SQLiteForkTapeStore` creation in `bub_sf/src/bub_sf/hook.py`.
+  - Root cause: `SFHookImpl.__init__` eagerly opens `tape_store.db`; for `--help`, Typer exits before the command body, so `framework.shutdown()` never closes the store, and Python hangs in `threading._shutdown` waiting for the non-daemon aiosqlite worker.
+  - The requested atexit handler with `asyncio.run(fork_store.close())` was tried but still hung because the aiosqlite worker cannot be reliably woken during interpreter shutdown.
+  - Verified: `uv run bub sf-check --help > /dev/null`, `bub print-tape --help`, and `bub list-tapes --help` now exit immediately.
+  - **Change:** `bub_sf/src/bub_sf/hook.py` commit `396058e`
 
 ## Todo
 
@@ -179,10 +185,6 @@ See [`analysis/PROJECT_VISION.md`](analysis/PROJECT_VISION.md) for the core thes
     - It's often the case the workflow has steps, each has it's goal. Yet we'd like them to share a tape so it has accumulated global view, but with different focuses.
     - example: `do_a ; do_b ; do_c`, each with its own Prompt.
     - realized it's just plain function calls, but maybe we can sequence `Maybe` as a good helper
-
-39. **`bub sf-check --help` hangs / requires terminal input** `#bug`
-    - Running `uv run bub sf-check --help` opens an interactive pager/editor and does not return when stdout is not a terminal.
-    - Expected: print usage and exit immediately, like other CLI commands.
 
 40. **comment macros `@include`**, `#feature`
     - to make prompt in its own .md file and included into the comment in the .sf file.
