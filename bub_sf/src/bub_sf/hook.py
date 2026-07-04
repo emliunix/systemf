@@ -223,14 +223,32 @@ class SFHookImpl:
     async def run_model_stream(self, prompt: str | list[dict], session_id: str, state: State) -> AsyncStreamEvents:
         """execute main.main systemf program"""
 
+        # systemf's main.main currently expects a string prompt. If bub's
+        # build_prompt produced a multimodal list (e.g. text + unsupported media
+        # parts), extract the text content and proceed.
+        if isinstance(prompt, list):
+            text_parts: list[str] = []
+            dropped_media_types: list[str] = []
+            for part in prompt:
+                part_type = part.get("type")
+                if part_type == "text":
+                    text_parts.append(str(part.get("text", "")))
+                else:
+                    dropped_media_types.append(str(part_type))
+            if dropped_media_types:
+                logger.warning(
+                    "systemf dropping unsupported media parts: {}",
+                    dropped_media_types,
+                )
+            prompt = "\n".join(text_parts)
+            if not prompt:
+                raise Exception("No text content found in multimodal prompt")
+
         if isinstance(prompt, str) and prompt.startswith(","):
             if (cmd_res := await _get_agent(state)
                 .run_command_stream(get_tape_name(state), prompt, state)
                ) is not None:
                 return cmd_res
-
-        if not isinstance(prompt, str):
-            raise Exception("Only string prompt is supported for now")
         
         session = self.get_or_create(session_id)
         state["sf_repl"] = session.repl
