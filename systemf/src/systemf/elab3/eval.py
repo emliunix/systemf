@@ -25,7 +25,7 @@ from systemf.elab3.types.protocols import REPLSessionProto
 from .types.ty import Id, Name
 from .types.mod import Module
 from .types.val import CoreValUnsafe, VAsync, Val, VLit, VClosure, VData, Trap, Env
-from .types.vpartial import SessionAwareFinish, VPartial
+from .types.suspend import VSuspend
 
 
 # =============================================================================
@@ -52,8 +52,8 @@ class Ar(Cont):
 
 @dataclass
 class Ap(Cont):
-    """Apply a closure/partial/primop to the incoming value."""
-    closure: VClosure | VPartial
+    """Apply a closure/suspended-primop to the incoming value."""
+    closure: VClosure | VSuspend
     k: Cont
 
 
@@ -233,7 +233,7 @@ class Evaluator:
         match k:
             case Ar(arg=arg, env=env, k=k2):
                 match v:
-                    case VClosure() | VPartial():
+                    case VClosure() | VSuspend():
                         return (arg, env, Ap(v, k2))
                     case _:
                         raise Exception(
@@ -243,18 +243,15 @@ class Evaluator:
                 match f:
                     case VClosure(env=cenv, param=param, body=body):
                         return (body, cenv.set(param.name.unique, v), k2)
-                    case VPartial(name=name, arity=arity, done=done, finish=finish):
+                    case VSuspend(name=name, arity=arity, done=done, finish=finish):
                         new_done = done + [v]
                         if arity == len(new_done):
-                            if isinstance(finish, SessionAwareFinish):
-                                res = finish(new_done, session=self.ctx.get_session())
-                            else:
-                                res = finish(new_done) 
-                            # VPartial apply is the only place where VAsync can appear
+                            res = finish(new_done, self.ctx.get_session())
+                            # VSuspend apply is the only place where VAsync can appear
                             return await self.call_continue(await unasync(res), k2)
                         else:
                             return await self.call_continue(
-                                VPartial(name, arity, new_done, finish), k2
+                                VSuspend(name, arity, new_done, finish), k2
                             )
             case LetBind(binder=binder, body=body, env=env, k=k2):
                 return (body, env.set(binder.name.unique, v), k2)

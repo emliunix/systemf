@@ -2,7 +2,7 @@
 from .types.protocols import TyLookup
 from .types.ty import Ty, TyConApp, subst_ty
 from .types.val import HasDoc, VPrim, Val, Trap, VData, VClosure, VLit
-from .types.vpartial import VPartial
+from .types.suspend import VSuspend
 from .core_extra import lookup_data_con_by_tag
 
 
@@ -18,7 +18,7 @@ def pp_val(ctx: TyLookup, val: Val, ty: Ty) -> str:
                 return f"{dcon.name.surface} {vals_str}".strip()
             case VLit(lit=lit), _:
                 return f"{lit!r}"
-            case VPartial(name=name, arity=arity), _:
+            case VSuspend(name=name, arity=arity), _:
                 return f"<func {name} {arity}>"
             case VClosure(), _:
                 return "<closure>"

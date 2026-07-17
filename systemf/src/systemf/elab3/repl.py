@@ -24,7 +24,7 @@ from .types import Module, REPLContext, Name, NameCache
 from .types.protocols import Ext, REPLSessionProto, Synthesizer
 from .types.tything import AnId
 from .types.val import Val
-from .types.vpartial import VPartial
+from .types.suspend import VSuspend
 
 
 class REPL(REPLContext):
@@ -134,7 +134,7 @@ def _builtins_primops() -> dict[str, Val]:
     builtins: dict[str, Val] = {}
 
     def _reg(surface: str, arity: int, func):
-        builtins[surface] = VPartial.create(surface, arity, func)
+        builtins[surface] = VSuspend.create(surface, arity, lambda args, _session: func(args))
 
     _reg(bi.BUILTIN_INT_PLUS.surface, 2, rts.int_plus)
     _reg(bi.BUILTIN_INT_MINUS.surface, 2, rts.int_minus)
