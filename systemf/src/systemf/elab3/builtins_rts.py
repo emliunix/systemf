@@ -1,7 +1,7 @@
 """Runtime support for builtin primitive operations.
 
 This module provides pure function implementations.  The REPL layer
-is responsible for wrapping them in ``VPartial`` and registering them
+is responsible for wrapping them in ``VSuspend`` and registering them
 via ``REPLContext.get_primop``.
 
 Bool (``&&``, ``||``, ``not``) are NOT primops — they are regular

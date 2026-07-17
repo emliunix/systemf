@@ -53,7 +53,7 @@ from systemf.elab3.types.val import (
     VClosure,
     VData,
 )
-from systemf.elab3.types.vpartial import VPartial
+from systemf.elab3.types.suspend import VSuspend
 from systemf.elab3.types.core import (
     CoreLit,
     CoreVar,
@@ -176,6 +176,9 @@ class FakeCtx(EvalCtx, TyLookup):
     @override
     def core_extra(self) -> CoreBuilderExtra:
         return self._core_extra
+
+    def get_session(self):
+        return None
 
     @override
     async def lookup_gbl(self, name: Name) -> Val:
@@ -406,9 +409,9 @@ async def test_builtin_partial_saturation():
     # FIX: check test_builtin_bool_constructors and fix
     cons_id = Id(BUILTIN_LIST_CONS, TyInt())
     nil_id = Id(BUILTIN_LIST_NIL, TyInt())
-    # Cons 1 -> VPartial
+    # Cons 1 -> VSuspend
     p1 = await ev._eval_expr(CoreApp(CoreVar(cons_id), CoreLit(LitInt(1))), pmap())
-    assert isinstance(p1, VPartial)
+    assert isinstance(p1, VSuspend)
     assert p1.done == [VLit(LitInt(1))]
     # (Cons 1) Nil -> VData
     full = await ev._eval_expr(
@@ -641,14 +644,14 @@ async def test_multi_rec_unguarded_mutual_reference_raises():
 
 
 # =============================================================================
-# VPartial (primops are VPartial)
+# VSuspend (primops are VSuspend)
 # =============================================================================
 
-async def test_primops_are_vpartial():
-    """Primitive operations should resolve to VPartial."""
+async def test_primops_are_vsuspend():
+    """Primitive operations should resolve to VSuspend."""
     ctx = await FakeCtx.create()
     result = await ctx.lookup_gbl(BUILTIN_INT_PLUS)
-    assert isinstance(result, VPartial)
+    assert isinstance(result, VSuspend)
     assert result.name == "int_plus"
     assert result.arity == 2
     assert result.done == []

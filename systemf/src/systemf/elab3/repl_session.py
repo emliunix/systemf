@@ -21,7 +21,7 @@ from .types import Module, TyThing, REPLContext, Name
 from .types.ty import Id, Ty, TyConApp, TyFun
 from .types.tything import ACon, AnId, tything_name
 from .types.val import CoreValUnsafe, VData, Val
-from .types.vpartial import VPartial
+from .types.suspend import VSuspend
 
 
 class REPLSession(EvalCtx, REPLSessionProto):
@@ -109,7 +109,7 @@ class REPLSession(EvalCtx, REPLSessionProto):
         """Add a return value setter to the REPL session."""
         ret_mod = f"Ret{self.ctx.next_replmod_id()}"
         fun_ty = TyFun(ty, TyConApp(name=bi.BUILTIN_UNIT, args=[]))
-        def _fun(args: list[Val]) -> Val:
+        def _fun(args: list[Val], _session: REPLSessionProto | None) -> Val:
             if len(args) != 1:
                 raise Exception(f"Expected exactly one argument for REPL return, got {len(args)}")
             ref[0] = args[0]
@@ -117,7 +117,7 @@ class REPLSession(EvalCtx, REPLSessionProto):
         fun_name = self.name_gen(ret_mod).new_name("set_return", None)
         self.extend_tythings_rdr([cast(TyThing, AnId.create(Id(name=fun_name, ty=fun_ty), is_prim=True))])
         self.mod_insts[ret_mod] = {
-            fun_name: VPartial.create(fun_name.surface, 1, _fun)
+            fun_name: VSuspend.create(fun_name.surface, 1, _fun)
         }
 
     async def eval(self, input: str) -> tuple[Val, Ty] | None:
@@ -288,7 +288,7 @@ def mk_mod_inst(mod: Module, get_primop: Callable[[Name, AnId], Val]) -> dict[Na
     for name, thing in mod.tythings:
         match thing:
             case ACon(name=con_name, tag=tag, arity=arity):
-                mod_inst[name] = VPartial.create(
+                mod_inst[name] = VSuspend.create(
                     con_name.surface, arity,
                     _mk_data(tag),
                 )
@@ -297,8 +297,8 @@ def mk_mod_inst(mod: Module, get_primop: Callable[[Name, AnId], Val]) -> dict[Na
             case _: pass
     return mod_inst
 
-def _mk_data(tag: int) -> Callable[[list[Val]], Val]:
-    def _con(args: list[Val]) -> Val:
+def _mk_data(tag: int) -> Callable[[list[Val], REPLSessionProto | None], Val]:
+    def _con(args: list[Val], _session: REPLSessionProto | None) -> Val:
         return VData(tag, args)
     return _con
 

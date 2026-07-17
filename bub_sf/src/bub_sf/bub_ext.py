@@ -23,7 +23,7 @@ from systemf.elab3.types.protocols import Ext, REPLSessionProto, Synthesizer
 from systemf.elab3.types.ty import LitString, Name, Ty, TyConApp, TyForall, TyFun, TyString
 from systemf.elab3.types.tything import AnId
 from systemf.elab3.types.val import VAsync, VData, VLit, VPrim, Val
-from systemf.elab3.types.vpartial import VPartial, SessionAwareFinish
+from systemf.elab3.types.suspend import VSuspend, finish_async
 
 
 # Compact when entries accumulated since the last anchor exceed this threshold.
@@ -143,19 +143,19 @@ class BubOps(Synthesizer):
 
         match name.surface:
             case "current_tape":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._current_tape))
+                return VSuspend.create(name.surface, len(arg_tys), self._current_tape)
             case "tape_fork":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_fork))
+                return VSuspend.create(name.surface, len(arg_tys), self._tape_fork)
             case "tape_make":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_make))
+                return VSuspend.create(name.surface, len(arg_tys), self._tape_make)
             case "tape_append":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_append))
+                return VSuspend.create(name.surface, len(arg_tys), self._tape_append)
             case "tape_handoff":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._tape_handoff))
+                return VSuspend.create(name.surface, len(arg_tys), self._tape_handoff)
             case "needs_compact":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._needs_compact))
+                return VSuspend.create(name.surface, len(arg_tys), self._needs_compact)
             case "inferior_tape":
-                return VPartial.create(name.surface, len(arg_tys), SessionAwareFinish(self._inferior_tape))
+                return VSuspend.create(name.surface, len(arg_tys), self._inferior_tape)
             case _:
                 return None
 
@@ -234,7 +234,7 @@ class LLMOps(Synthesizer):
             else:
                 return await _direct_llm_call(*llm_call_args, **agent_kwargs)
         
-        return VPartial.create(name.surface, match_res.orig_arg_num, SessionAwareFinish.from_async(_fun))
+        return VSuspend.create(name.surface, match_res.orig_arg_num, finish_async(_fun))
 
 
 @overload
