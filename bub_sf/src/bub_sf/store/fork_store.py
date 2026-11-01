@@ -8,11 +8,11 @@ import itertools
 import json
 import uuid
 
-from collections.abc import AsyncGenerator, AsyncIterable, AsyncIterator, Coroutine
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, ParamSpec, TypeVar, override
+from typing import Any, override
 
 from republic.core.errors import ErrorKind, RepublicError
 from republic.tape.entries import TapeEntry
@@ -318,6 +318,7 @@ class SQLiteForkTapeStore(AsyncTapeStore):
         self._conn: aiosqlite.Connection = conn
         self._core: CoreOps = CoreOps(conn)
         self._query: BuildQueryImpl = BuildQueryImpl(conn, self._core)
+        self._lock = asyncio.Lock()
 
     @staticmethod
     async def create_store(db_path: Path) -> SQLiteForkTapeStore:
@@ -402,7 +403,7 @@ class SQLiteForkTapeStore(AsyncTapeStore):
             """, (source_tape_id,)) as cursor:
             rows = await cursor.fetchall()
             if any(row is None for row in rows):
-                raise RepublicError(ErrorKind.INVALID_INPUT, f"invalid tape: tool_call without an assistant entry")
+                raise RepublicError(ErrorKind.INVALID_INPUT, "invalid tape: tool_call without an assistant entry")
         assistant_row, fork_row = [_tape_entry(row) for row in rows]
         assistant_row.payload.pop("tool_calls", None)
         await self._core.fork(source_name, fork_row.id, target_name)
@@ -412,23 +413,24 @@ class SQLiteForkTapeStore(AsyncTapeStore):
     # -- Read operations --
 
     async def read(self, tape_name: str) -> list[TapeEntry] | None:
-        tape_id = await self._core._get_tape_id(tape_name)  # Validate tape exists
-        if tape_id is None:
-            return None
+        async with self._lock:
+            tape_id = await self._core._get_tape_id(tape_name)  # Validate tape exists
+            if tape_id is None:
+                return None
 
-        async with self._conn.execute(
-            f"""
-            SELECT {TAPE_FIELDS}
-            FROM merged_entries
-            WHERE leaf_tape_id = ? AND entry_id IS NOT NULL
-            ORDER BY depth DESC, entry_id
-            """,
-            (tape_id,),
-        ) as cursor:
-            entries = []
-            async for row in cursor:
-                entries.append(_tape_entry(row))
-        return entries
+            async with self._conn.execute(
+                f"""
+                SELECT {TAPE_FIELDS}
+                FROM merged_entries
+                WHERE leaf_tape_id = ? AND entry_id IS NOT NULL
+                ORDER BY depth DESC, entry_id
+                """,
+                (tape_id,),
+            ) as cursor:
+                entries = []
+                async for row in cursor:
+                    entries.append(_tape_entry(row))
+            return entries
 
     async def fetch_all(self, query: TapeQuery) -> list[TapeEntry]:
         async with self._tranx() as conn:
@@ -457,25 +459,28 @@ class SQLiteForkTapeStore(AsyncTapeStore):
             return entries
 
     async def list_tapes(self) -> list[str]:
-        async with self._conn.execute("SELECT name FROM tapes ORDER BY name") as cursor:
-            return [row[0] async for row in cursor]
+        async with self._lock:
+            async with self._conn.execute("SELECT name FROM tapes ORDER BY name") as cursor:
+                return [row[0] async for row in cursor]
 
     async def list_tapes_ext(self) -> list[tuple[str, dict[str, Any]]]:
-        async with self._conn.execute(
-            "SELECT name, created FROM tapes ORDER BY created DESC"
-        ) as cursor:
-            return [(row[0], {"created": row[1]}) async for row in cursor]
+        async with self._lock:
+            async with self._conn.execute(
+                "SELECT name, created FROM tapes ORDER BY created DESC"
+            ) as cursor:
+                return [(row[0], {"created": row[1]}) async for row in cursor]
         
     @asynccontextmanager
     async def _tranx(self) -> AsyncGenerator[aiosqlite.Connection]:
         """Async context manager for transactions."""
-        await self._conn.execute("BEGIN")
-        try:
-            yield self._conn
-            await self._conn.commit()
-        except Exception as e:
-            await self._conn.rollback()
-            raise e from e
+        async with self._lock:
+            await self._conn.execute("BEGIN")
+            try:
+                yield self._conn
+                await self._conn.commit()
+            except Exception as e:
+                await self._conn.rollback()
+                raise e from e
 
 
 def _tape_entry(row: aiosqlite.Row) -> TapeEntry:

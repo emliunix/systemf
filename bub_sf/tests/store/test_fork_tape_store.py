@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
-from republic.core.errors import ErrorKind, RepublicError
+from republic.core.errors import RepublicError
 from republic.tape.entries import TapeEntry
 from republic.tape.query import TapeQuery
 
@@ -145,6 +147,19 @@ class TestCoreOperations:
         assert len(result) == 3
         assert [e.id for e in result] == [0, 1, 2]
         assert result == entries
+
+    @pytest.mark.asyncio
+    async def test_concurrent_fetch_all(self, store):
+        """Concurrent searches serialize their transactions on the shared connection."""
+        await store.append("main", make_entry(0, payload={"role": "user", "content": "hello world"}))
+
+        hello, world = await asyncio.gather(
+            store.fetch_all(TapeQuery(tape="main").query("hello")),
+            store.fetch_all(TapeQuery(tape="main").query("world")),
+        )
+
+        assert [entry.id for entry in hello] == [0]
+        assert [entry.id for entry in world] == [0]
 
     @pytest.mark.asyncio
     async def test_list_tapes(self, store):
